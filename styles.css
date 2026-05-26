@@ -1,0 +1,540 @@
+.odyssey-chat {
+  --odyssey-bg: color-mix(in srgb, var(--background-primary) 94%, #edf3ef 6%);
+  --odyssey-surface: color-mix(in srgb, var(--background-primary) 88%, var(--background-secondary) 12%);
+  --odyssey-surface-strong: color-mix(in srgb, var(--background-secondary) 78%, #dce7e0 22%);
+  --odyssey-border: color-mix(in srgb, var(--background-modifier-border) 82%, #8fa79b 18%);
+  --odyssey-accent: #5d7f78;
+  --odyssey-accent-strong: #365b55;
+  --odyssey-accent-soft: color-mix(in srgb, #dcebe5 58%, var(--background-primary) 42%);
+  --odyssey-warm: color-mix(in srgb, #f3eadb 52%, var(--background-primary) 48%);
+  --odyssey-text-on-accent: #102a26;
+  --odyssey-shadow: rgba(18, 36, 32, 0.09);
+  --odyssey-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  background: var(--odyssey-bg);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.theme-dark .odyssey-chat {
+  --odyssey-bg: color-mix(in srgb, var(--background-primary) 93%, #16201d 7%);
+  --odyssey-surface: color-mix(in srgb, var(--background-primary) 88%, #26302d 12%);
+  --odyssey-surface-strong: color-mix(in srgb, var(--background-secondary) 82%, #3c4b46 18%);
+  --odyssey-border: color-mix(in srgb, var(--background-modifier-border) 78%, #536b63 22%);
+  --odyssey-accent: #8db6a8;
+  --odyssey-accent-strong: #b8d8cc;
+  --odyssey-accent-soft: color-mix(in srgb, #24483e 58%, var(--background-primary) 42%);
+  --odyssey-warm: color-mix(in srgb, #3a3225 54%, var(--background-primary) 46%);
+  --odyssey-text-on-accent: #eef8f2;
+  --odyssey-shadow: rgba(0, 0, 0, 0.26);
+}
+
+.odyssey-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--odyssey-border);
+}
+
+.odyssey-toolbar strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--odyssey-accent-strong);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.odyssey-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.odyssey-toolbar-actions button,
+.odyssey-input-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--odyssey-radius);
+  background: transparent;
+  color: var(--text-muted);
+  box-shadow: none;
+}
+
+.odyssey-toolbar-actions button:hover,
+.odyssey-toolbar-actions button:focus,
+.odyssey-input-row button:hover,
+.odyssey-input-row button:focus {
+  border-color: var(--odyssey-border);
+  background: var(--odyssey-accent-soft);
+  color: var(--text-normal);
+}
+
+.odyssey-toolbar-actions button.is-active {
+  border-color: color-mix(in srgb, var(--color-red) 42%, var(--odyssey-border) 58%);
+  background: color-mix(in srgb, var(--color-red) 12%, var(--background-primary) 88%);
+  color: var(--color-red);
+}
+
+.odyssey-lock-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 280px;
+  padding: 24px;
+  text-align: center;
+  border: 1px solid var(--odyssey-border);
+  border-radius: var(--odyssey-radius);
+  background: var(--odyssey-surface);
+  box-shadow: 0 14px 36px var(--odyssey-shadow);
+}
+
+.odyssey-lock-overlay h3 {
+  margin: 0 0 8px;
+}
+
+.odyssey-lock-overlay p {
+  margin: 0 0 16px;
+  color: var(--text-muted);
+}
+
+.odyssey-hidden {
+  display: none !important;
+}
+
+.odyssey-setup-panel {
+  border: 1px solid var(--odyssey-border);
+  border-radius: var(--odyssey-radius);
+  padding: 9px 11px;
+  background: var(--odyssey-warm);
+  color: var(--text-normal);
+  box-shadow: 0 1px 2px var(--odyssey-shadow);
+}
+
+.odyssey-setup-panel p {
+  margin: 4px 0 9px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.odyssey-setup-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.odyssey-safety-note {
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.odyssey-ephemeral-banner {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--color-red) 36%, var(--odyssey-border) 64%);
+  border-radius: var(--odyssey-radius);
+  background: color-mix(in srgb, var(--color-red) 8%, var(--background-primary) 92%);
+  color: var(--text-normal);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.odyssey-attachments {
+  border: 1px solid var(--odyssey-border);
+  border-radius: var(--odyssey-radius);
+  padding: 7px 9px;
+  background: color-mix(in srgb, var(--odyssey-surface) 84%, transparent);
+}
+
+.odyssey-attachments-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.odyssey-attachment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.odyssey-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--odyssey-border);
+  border-radius: var(--odyssey-radius);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 12px;
+}
+
+.odyssey-attachment-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.odyssey-attachment-chip button {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.odyssey-file-input {
+  display: none;
+}
+
+.odyssey-messages {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px 2px 6px;
+  scroll-behavior: smooth;
+}
+
+.odyssey-message-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: min(88%, 820px);
+}
+
+.odyssey-message-row-user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.odyssey-message-row-assistant,
+.odyssey-message-row-system {
+  align-self: flex-start;
+}
+
+.odyssey-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--odyssey-radius);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid var(--odyssey-border);
+  background: var(--odyssey-surface-strong);
+  color: var(--text-muted);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.odyssey-avatar-user {
+  background: var(--odyssey-accent);
+  color: var(--odyssey-text-on-accent);
+  border-color: transparent;
+}
+
+.odyssey-avatar-assistant {
+  background: var(--odyssey-warm);
+  color: var(--odyssey-accent-strong);
+}
+
+.odyssey-message {
+  border: 1px solid transparent;
+  border-radius: var(--odyssey-radius);
+  padding: 9px 11px;
+  background: var(--odyssey-surface);
+  max-width: 100%;
+  min-width: 120px;
+  flex: 0 1 auto;
+  box-shadow: 0 1px 2px var(--odyssey-shadow);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.odyssey-message-user {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--odyssey-accent-soft) 78%, var(--background-primary) 22%);
+  border-color: color-mix(in srgb, var(--odyssey-accent) 28%, transparent);
+  color: var(--text-normal);
+}
+
+.odyssey-message-assistant {
+  align-self: flex-start;
+  background: var(--background-primary);
+  border-color: var(--odyssey-border);
+}
+
+.odyssey-message-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.odyssey-message-user .odyssey-message-content {
+  text-align: left;
+}
+
+.odyssey-message-error {
+  border-color: var(--text-error);
+  color: var(--text-error);
+}
+
+.odyssey-message-pending {
+  color: var(--text-muted);
+  border-color: var(--odyssey-border);
+  background: color-mix(in srgb, var(--odyssey-surface) 85%, var(--odyssey-warm) 15%);
+}
+
+.odyssey-message-row-pending .odyssey-avatar {
+  opacity: 0.72;
+}
+
+.odyssey-message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+  margin-bottom: 5px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.odyssey-role {
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.odyssey-ephemeral-mark {
+  flex: 0 0 auto;
+  color: var(--color-red);
+  font-size: 11px;
+}
+
+.odyssey-message-user .odyssey-role {
+  color: var(--text-muted);
+}
+
+.odyssey-select-message {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  opacity: 0.45;
+}
+
+.odyssey-message:hover .odyssey-select-message,
+.odyssey-select-message:focus,
+.odyssey-select-message:checked {
+  opacity: 1;
+}
+
+.odyssey-copy-button {
+  width: 22px;
+  height: 22px;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+  flex: 0 0 auto;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.odyssey-message:not(:hover) .odyssey-copy-button {
+  opacity: 0;
+}
+
+.odyssey-copy-button:hover,
+.odyssey-copy-button:focus {
+  opacity: 1;
+  background: var(--background-modifier-hover);
+}
+
+.odyssey-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  flex: 0 0 auto;
+  padding: 8px;
+  border: 1px solid var(--odyssey-border);
+  border-radius: var(--odyssey-radius);
+  background: var(--background-primary);
+  box-shadow: 0 -1px 0 color-mix(in srgb, var(--odyssey-border) 58%, transparent), 0 6px 18px var(--odyssey-shadow);
+}
+
+.odyssey-input {
+  flex: 1;
+  min-height: 42px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 8px 2px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  line-height: 1.45;
+}
+
+.odyssey-input:focus {
+  box-shadow: none;
+}
+
+.odyssey-send-button {
+  color: var(--odyssey-accent-strong) !important;
+  background: var(--odyssey-accent-soft) !important;
+  border-color: color-mix(in srgb, var(--odyssey-accent) 24%, transparent) !important;
+}
+
+@media (max-width: 640px) {
+  .odyssey-chat {
+    padding: 8px;
+  }
+
+  .odyssey-message-row {
+    max-width: 94%;
+  }
+
+  .odyssey-avatar {
+    width: 26px;
+    height: 26px;
+    flex-basis: 26px;
+    font-size: 12px;
+  }
+
+  .odyssey-message {
+    padding: 8px 9px;
+  }
+}
+
+.odyssey-feedback-row {
+  align-self: center;
+  width: min(92%, 720px);
+}
+
+.odyssey-feedback-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--odyssey-border);
+  border-radius: var(--odyssey-radius);
+  background: var(--odyssey-warm);
+  box-shadow: 0 1px 3px var(--odyssey-shadow);
+}
+
+.odyssey-feedback-panel p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.odyssey-feedback-textarea {
+  min-height: 72px;
+  resize: vertical;
+  border-color: var(--odyssey-border);
+  background: var(--background-primary);
+}
+
+.odyssey-feedback-textarea:focus {
+  border-color: var(--odyssey-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--odyssey-accent) 24%, transparent);
+}
+
+.odyssey-feedback-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.odyssey-prompt-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.odyssey-prompt-modal h2,
+.odyssey-prompt-modal p {
+  margin: 0;
+}
+
+.odyssey-prompt-modal p {
+  color: var(--text-muted);
+}
+
+.odyssey-prompt-textarea {
+  min-height: 120px;
+  resize: vertical;
+  border-color: var(--odyssey-border);
+}
+
+.odyssey-prompt-password {
+  width: min(280px, 100%);
+  height: 44px;
+  align-self: center;
+  padding: 0 16px;
+  border: 1px solid color-mix(in srgb, var(--odyssey-border) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background-primary) 82%, transparent);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08), 0 8px 24px var(--odyssey-shadow);
+  color: var(--text-normal);
+  font-size: 15px;
+  line-height: 44px;
+  text-align: center;
+  outline: none;
+}
+
+.odyssey-prompt-password::placeholder {
+  color: var(--text-faint);
+}
+
+.odyssey-prompt-textarea:focus,
+.odyssey-prompt-password:focus {
+  border-color: var(--odyssey-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--odyssey-accent) 24%, transparent);
+}
+
+.odyssey-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

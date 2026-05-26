@@ -1,0 +1,20 @@
+node_modules/
+.home/
+.claude/
+.test-vault/
+.odyssey/
+odyssey/
+Odyssey/
+.obsidian/
+data.json
+settings-backup.json
+.env
+.env.*
+*.enc
+*.log
+.DS_Store
+.idea/
+*.map
+# Local/private prompt resources are not part of this public source build.
+prompts/
+src/context/prompt-bundle.ts

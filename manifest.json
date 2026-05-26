@@ -1,0 +1,11 @@
+{
+  "id": "odyssey",
+  "name": "Odyssey",
+  "version": "0.1.8",
+  "minAppVersion": "1.5.0",
+  "description": "Local-first conversational memory with inspectable Markdown records, cross-session recall, and append-only corrections.",
+  "author": "Odyssey",
+  "authorUrl": "https://meetodyssey.me",
+  "fundingUrl": "",
+  "isDesktopOnly": true
+}
