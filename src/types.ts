@@ -81,7 +81,7 @@ export interface OdysseySettings {
 export const DEFAULT_SETTINGS: OdysseySettings = {
   rootDir: "Odyssey",
   odysseyName: "Odyssey",
-  userAvatar: "我",
+  userAvatar: "Me",
   odysseyAvatar: "O",
   shadowIndexDir: ".odyssey",
   shadowIndexSecret: "",

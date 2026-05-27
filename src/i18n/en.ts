@@ -190,7 +190,7 @@ const en = {
   notices_importVaultPrompt: "Import scope must be explicit: folder:path, tag:#tag, or daily. Leave blank to cancel.",
   notices_importVaultCancelled: "Reference import cancelled. Enter folder:path, tag:#tag, or daily to avoid scanning the entire Vault.",
   notices_settingsResetRestored: "Odyssey detected a settings reset and restored from local backup.",
-  notices_memoryFilesLocked: "Odyssey memory files are locked by default. Run \"Temporarily unlock Odyssey memory files\" to inspect them.",
+  notices_memoryFilesLocked: "Odyssey memory files are locked by default. Open the command palette ({{modKey}}+P) and run \"Temporarily unlock Odyssey memory files\" to inspect them.",
   notices_memoryFilesUnlocked: "Odyssey memory files temporarily unlocked for {{minutes}} minutes.",
   notices_wrongPasscode: "Incorrect passcode. Memory files remain locked.",
 

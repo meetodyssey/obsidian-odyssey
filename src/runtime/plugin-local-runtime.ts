@@ -21,7 +21,7 @@ import { ModelGateway } from "../model/model-gateway";
 import { MemoryExtractor } from "../memory/memory-extractor";
 import { CorrectionDetector } from "../memory/correction-detector";
 import { nowIso } from "../utils/time";
-import { includesAny, truncateText } from "../utils/text";
+import { detectLanguage, includesAny, truncateText } from "../utils/text";
 
 export class PluginLocalRuntime implements AgentRuntime {
   private recentMessages: ChatMessage[] = [];
@@ -54,6 +54,7 @@ export class PluginLocalRuntime implements AgentRuntime {
 
   async sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
     const ephemeral = input.ephemeral === true;
+    const lang = detectLanguage(input.message);
     const userMessage: ChatMessage = { role: "user", content: input.message, created: nowIso(), ephemeral };
     const conversationPath = ephemeral ? "" : await this.store.appendConversationMessage(userMessage);
     this.recentMessages.push(userMessage);
@@ -87,7 +88,9 @@ export class PluginLocalRuntime implements AgentRuntime {
         { role: "assistant", content: completion.content, created: assistantMessage.created },
         {
           role: "user",
-          content: "请从上一条回答被截断的位置继续写。不要重复已经说过的内容，不要重新开头，直接续上。",
+          content: lang === "zh"
+            ? "请从上一条回答被截断的位置继续写。不要重复已经说过的内容，不要重新开头，直接续上。"
+            : "Continue from where the previous response was cut off. Do not repeat what was already said, do not restart — pick up directly where you left off.",
           created: nowIso()
         }
       );

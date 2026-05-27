@@ -78,7 +78,6 @@ describe("M1 local fact source", () => {
     expect(vault.folders.has("Odyssey/References")).toBe(true);
     expect(vault.folders.has("Odyssey/Exports")).toBe(true);
     expect(vault.folders.has("Odyssey/Feedback")).toBe(true);
-    expect(vault.folders.has("Odyssey/MindFilters")).toBe(true);
     expect(vault.folders.has("Odyssey/Index")).toBe(true);
   });
 

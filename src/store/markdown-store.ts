@@ -29,23 +29,16 @@ export class MarkdownStore {
       this.path("References"),
       this.path("Exports"),
       this.path("Feedback"),
-      this.path("MindFilters"),
       this.path("Index")
     ];
     for (const dir of dirs) await this.ensureFolder(dir);
-    await this.ensureFile(this.path("MindFilters/default.json"), JSON.stringify({
-      id: "default",
-      name: "Default",
-      mode: "gentle_reflection",
-      rules: ["Don't fabricate facts", "Don't replace real relationships", "Distinguish stored facts, current context, and inferences"]
-    }, null, 2));
     await this.ensureFile(this.path("Index/document-index.json"), JSON.stringify({ documents: [], rebuiltAt: nowIso() }, null, 2));
     await this.ensureFile(this.path("Index/memory-index.json"), JSON.stringify({ memories: [], rebuiltAt: nowIso() }, null, 2));
   }
 
   async appendConversationMessage(message: ChatMessage): Promise<string> {
     const path = this.conversationPath();
-    const role = message.role === "user" ? "用户" : message.role === "assistant" ? this.settings.odysseyName : "系统";
+    const role = message.role === "user" ? (this.settings.userAvatar || "User") : message.role === "assistant" ? this.settings.odysseyName : "System";
     const created = message.created ?? nowIso();
     const block = `\n\n## ${created} ${role}\n\n${message.content.trim()}\n`;
     await this.appendFile(path, block, `# ${dateStamp()}\n`);

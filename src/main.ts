@@ -1,6 +1,10 @@
-import { MarkdownView, Menu, Notice, normalizePath, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
+import { FuzzySuggestModal, MarkdownView, Menu, Notice, normalizePath, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { DEFAULT_SETTINGS, OdysseySettings, ReferenceImportResult, normalizeSettings } from "./types";
-import { t } from "./i18n";
+import { t, setLanguage } from "./i18n";
+
+function platformModKey(): string {
+  return navigator.platform?.toLowerCase().includes("mac") ? "Cmd" : "Ctrl";
+}
 import { MarkdownStore } from "./store/markdown-store";
 import { LocalIndex } from "./index/local-index";
 import { ShadowIndexStore } from "./index/shadow-index-store";
@@ -15,6 +19,7 @@ import { ODYSSEY_VIEW_TYPE, OdysseyChatView } from "./ui/chat-view";
 import { OdysseySettingTab } from "./settings";
 import { generateSecret } from "./utils/security";
 import { verifyPasscode } from "./utils/security";
+import { promptForText } from "./ui/prompt";
 
 export default class OdysseyPlugin extends Plugin {
   settings!: OdysseySettings;
@@ -29,6 +34,7 @@ export default class OdysseyPlugin extends Plugin {
   async onload(): Promise<void> {
     try {
       await this.loadSettings();
+      this.detectAndSetLanguage();
       await this.initializeServices();
       await this.registerPluginUi();
       this.closeProtectedMemoryLeaves();
@@ -40,6 +46,15 @@ export default class OdysseyPlugin extends Plugin {
       await this.writeBootError(message);
       this.notice(t("notices_pluginLoadFailed"));
       throw error;
+    }
+  }
+
+  private detectAndSetLanguage(): void {
+    try {
+      const lang = localStorage.getItem("language") ?? navigator.language;
+      setLanguage(lang);
+    } catch {
+      // keep default
     }
   }
 
@@ -63,7 +78,10 @@ export default class OdysseyPlugin extends Plugin {
     this.addCommand({
       id: "unlock-odyssey-memory-files",
       name: t("commands_unlockMemoryFiles"),
-      callback: () => this.unlockMemoryFilesForViewing()
+      callback: async () => {
+        if (!await this.unlockMemoryFilesForViewing()) return;
+        this.showMemoryFilePicker();
+      }
     });
     this.addCommand({
       id: "arrange-odyssey-workspace",
@@ -215,10 +233,17 @@ export default class OdysseyPlugin extends Plugin {
     return files.filter(file => file.path.toLowerCase().includes(normalized.toLowerCase()));
   }
 
-  unlockMemoryFilesForViewing(minutes = 10): boolean {
+  async unlockMemoryFilesForViewing(minutes = 10): Promise<boolean> {
     const expectedHash = this.settings.privacyLockPasscodeHash;
     if (expectedHash) {
-      const passcode = window.prompt(t("chat_unlockPlaceholder"));
+      const passcode = await promptForText(this.app, {
+        title: t("chat_unlockTitle"),
+        description: t("chat_unlockDesc"),
+        placeholder: t("chat_unlockPlaceholder"),
+        submitText: t("chat_unlockSubmit"),
+        password: true,
+        trim: false
+      });
       if (!passcode || !verifyPasscode(passcode, expectedHash)) {
         this.notice(t("notices_wrongPasscode"));
         return false;
@@ -229,6 +254,24 @@ export default class OdysseyPlugin extends Plugin {
     return true;
   }
 
+  private showMemoryFilePicker(): void {
+    const root = normalizePath(this.settings.rootDir || "Odyssey");
+    const files = this.app.vault.getMarkdownFiles()
+      .filter(f => {
+        const p = normalizePath(f.path);
+        return p.startsWith(root + "/") && !p.includes("Prompts/");
+      });
+    if (files.length === 0) {
+      this.notice("No Odyssey memory files found.");
+      return;
+    }
+    new MemoryFileSuggestModal(this.app, files, async (file) => {
+      const leaf = this.findEmptyLeaf() ?? this.app.workspace.getLeaf();
+      await leaf.openFile(file, { active: true });
+      this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    }).open();
+  }
+
   private addProtectedFileMenu(menu: Menu, file: TAbstractFile): void {
     if (!(file instanceof TFile)) return;
     if (!this.isProtectedMemoryFile(file)) return;
@@ -236,7 +279,7 @@ export default class OdysseyPlugin extends Plugin {
       .setTitle(t("commands_unlockMemoryFiles"))
       .setIcon("unlock")
       .onClick(async () => {
-        if (!this.unlockMemoryFilesForViewing()) return;
+        if (!await this.unlockMemoryFilesForViewing()) return;
         const emptyLeaf = this.findEmptyLeaf();
         const odysseyLeaf = this.app.workspace.getLeavesOfType(ODYSSEY_VIEW_TYPE)[0];
         const leaf = emptyLeaf ?? (odysseyLeaf
@@ -255,7 +298,7 @@ export default class OdysseyPlugin extends Plugin {
       if (this.isMemoryFileUnlocked()) return;
       this.closeProtectedMemoryLeaves();
       this.scheduleWorkspaceCleanup();
-      this.notice(t("notices_memoryFilesLocked"));
+      this.notice(t("notices_memoryFilesLocked", { modKey: platformModKey() }));
     }, 0);
   }
 
@@ -629,4 +672,26 @@ function findFirstLeafId(node: WorkspaceNodeData | undefined): string | undefine
 
 function makeWorkspaceId(): string {
   return Math.random().toString(16).slice(2, 18).padEnd(16, "0");
+}
+
+class MemoryFileSuggestModal extends FuzzySuggestModal<TFile> {
+  constructor(
+    app: import("obsidian").App,
+    private readonly files: TFile[],
+    private readonly onChoose: (file: TFile) => void
+  ) {
+    super(app);
+  }
+
+  getItems(): TFile[] {
+    return this.files;
+  }
+
+  getItemText(file: TFile): string {
+    return file.path;
+  }
+
+  onChooseItem(file: TFile): void {
+    this.onChoose(file);
+  }
 }

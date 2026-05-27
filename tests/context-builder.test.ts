@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { ContextBuilder } from "../src/context/context-builder";
 import { DEFAULT_SETTINGS, IndexedMemory } from "../src/types";
 
-function makeStore(mindFilterJson = JSON.stringify({ id: "default", name: "Default", mode: "gentle_reflection", rules: ["Don't fabricate facts"] }), conversationResult: any = null) {
+function makeStore(conversationResult: any = null) {
   return {
     anchorFor: (path: string) => `[[${path}]]`,
     path: (child: string) => `Odyssey/${child}`,
-    readFile: async (path: string) => path.includes("/Prompts/") ? "" : mindFilterJson,
+    readFile: async (_path: string) => "",
     readConversationMessagesForDate: async () => conversationResult
   };
 }
@@ -82,7 +82,7 @@ describe("context builder source-of-truth rules", () => {
 
     expect(system).toContain("Rules:");
     expect(system).toContain("say so directly");
-    expect(system).toContain("Reply in the user's language");
+    expect(system).toContain("CRITICAL");
   });
 
   it("puts an explicit no-visible-document warning when no references are attached", async () => {
@@ -196,7 +196,7 @@ describe("context builder source-of-truth rules", () => {
       entities: [],
       confidence: "medium"
     };
-    const store = makeStore(undefined, {
+    const store = makeStore({
       path: "Odyssey/Conversations/2026/05/2026-05-13.md",
       messages: [
         {

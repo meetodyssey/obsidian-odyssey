@@ -192,7 +192,7 @@ export const zh: Partial<Record<LocaleKey, string>> = {
   notices_importVaultPrompt: "导入范围必须显式指定：folder:路径、tag:#标签 或 daily。留空将取消。",
   notices_importVaultCancelled: "已取消 Reference 导入。为避免越界扫描，请显式输入 folder:路径、tag:#标签 或 daily。",
   notices_settingsResetRestored: "Odyssey 检测到设置被重置，已从本地插件备份恢复。",
-  notices_memoryFilesLocked: "Odyssey 记忆文件默认锁定。需要查看时，请先运行\"临时解锁 Odyssey 记忆文件\"。",
+  notices_memoryFilesLocked: "Odyssey 记忆文件默认锁定。请通过命令面板（{{modKey}}+P）运行\"临时解锁 Odyssey 记忆文件\"以查看。",
   notices_memoryFilesUnlocked: "Odyssey 记忆文件已临时解锁 {{minutes}} 分钟。",
   notices_wrongPasscode: "密码不正确，记忆文件仍保持锁定。",
 

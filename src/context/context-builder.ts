@@ -4,21 +4,7 @@ import { RetrievalService } from "../retrieval/retrieval-service";
 import { estimateTokens, extractKeywords, truncateText, detectLanguage } from "../utils/text";
 import { readPackagedPromptResource } from "./packaged-prompt-resources";
 
-interface MindFilter {
-  id: string;
-  name: string;
-  mode: "factual_replay" | "gentle_reflection";
-  rules: string[];
-}
-
-const MODE_PROMPTS: Record<MindFilter["mode"], string> = {
-  factual_replay: "Factual replay. Stay neutral, anchor on user's own words and raw records, minimize speculative language.",
-  gentle_reflection: "Gentle reflection. Warm but bounded — help the user organize thoughts, notice growth shifts, never diagnose."
-};
-
 export class ContextBuilder {
-  private mindFilterCache: MindFilter | null = null;
-  private mindFilterCacheTime = 0;
 
   constructor(
     private readonly settings: OdysseySettings,
@@ -36,6 +22,7 @@ export class ContextBuilder {
     const speed = tier === "constrained" ? this.settings.chatModelSpeedTier : "fast";
     // Recall mode prioritizes accuracy over speed — lift prompt constraints
     const isRecall = intent.mode === "recall";
+    const lang = detectLanguage(userMessage);
 
     const l0 = this.renderRecent(recentMessages, userMessage, intent);
     const attached = this.renderAttachedReferences(attachedReferences, 5200, userMessage, intent.keywords)
@@ -62,9 +49,7 @@ export class ContextBuilder {
     const corrections = this.renderRetrieved(visibleRetrieved.filter(item => item.memory.type === "correction"), 900);
     const references = this.renderRetrieved(visibleRetrieved.filter(item => item.memory.type === "reference"), 700);
 
-    const system = await this.buildSystemPrompt(isRecall ? "standard" : tier, speed, userMessage);
-
-    const filter = await this.readActiveMindFilter();
+    const system = await this.buildSystemPrompt(isRecall ? "standard" : tier, speed, lang);
     const evidenceBoundary = buildEvidenceBoundary(visibleRetrieved, attachedReferences, intent);
     const isConstrained = tier === "constrained" && !isRecall;
     const hasEvidence = visibleRetrieved.length > 0 || attachedReferences.length > 0;
@@ -77,9 +62,6 @@ export class ContextBuilder {
       skipMeta
         ? ""
         : section("Evidence Boundary (read this first)", evidenceBoundary),
-      (isConstrained && speed !== "fast")
-        ? ""
-        : section("Current Mind Filter", `${MODE_PROMPTS[filter.mode]} Rules: ${filter.rules.join("; ")}`),
       section("L0 Current Memory (recent user words)",
         isConstrained ? this.renderRecentConstrained(recentMessages, userMessage, intent, speed) : l0),
       section("L0 Attached References (current conversation priority)", attached),
@@ -98,7 +80,7 @@ export class ContextBuilder {
     // grounding boundary as a short manifest at the start of the user turn, where
     // small models pay the most attention.
     const userContent = tier === "constrained"
-      ? `${buildVisibleManifest(visibleRetrieved, attachedReferences, intent)}\n\n${userMessage}`
+      ? `${buildVisibleManifest(visibleRetrieved, attachedReferences, intent, lang)}\n\n${userMessage}`
       : userMessage;
     const messages: ChatMessage[] = [
       { role: "system", content: system },
@@ -131,8 +113,7 @@ export class ContextBuilder {
     };
   }
 
-  private async buildSystemPrompt(tier: ResolvedModelTier, speed: string, userMessage: string): Promise<string> {
-    const lang = detectLanguage(userMessage);
+  private async buildSystemPrompt(tier: ResolvedModelTier, speed: string, lang: string): Promise<string> {
     const name = this.settings.odysseyName;
 
     if (tier === "constrained") {
@@ -192,7 +173,7 @@ export class ContextBuilder {
       "4. When corrected, acknowledge the error directly and fix it without defending.",
       "5. Match reply length to the user's question. Be concise.",
       "6. When the user asks you to recall but there's no relevant memory, ask for specifics.",
-      "Reply in the user's language.",
+      "CRITICAL: Always reply in the same language the user writes in. Match the user's language exactly — do not switch languages.",
     ].join("\n");
   }
 
@@ -205,7 +186,7 @@ export class ContextBuilder {
     }
     return [
       `You are "${this.settings.odysseyName}", the user's digital companion.`,
-      "Keep replies very short, 1-2 sentences. Reply in the user's language.",
+      "Keep replies very short, 1-2 sentences. CRITICAL: Reply in the same language the user writes in. Do not switch languages.",
     ].join("\n");
   }
 
@@ -217,7 +198,7 @@ export class ContextBuilder {
       "Do not describe information introduced in the user's current message as something you remember from before.",
       "When corrected, acknowledge the error directly, fix it, and do not defend it.",
       "Do not present yourself as a medical, legal, financial, or mental-health professional.",
-      "Respond in the user's language. Be concise and natural.",
+      "CRITICAL: Always respond in the same language the user writes in. If the user writes in English, reply in English. Match the user's language exactly — do not switch languages. Be concise and natural.",
       "For a more tailored experience, add a custom system prompt file to the Odyssey Prompts directory."
     ].join("\n");
   }
@@ -233,47 +214,6 @@ export class ContextBuilder {
       "用用户的语言回复，保持简洁自然。",
       "如需更个性化的体验，可在 Odyssey Prompts 目录中添加自定义提示词文件。"
     ].join("\n");
-  }
-
-  private async readActiveMindFilter(): Promise<MindFilter> {
-    if (this.mindFilterCache && Date.now() - this.mindFilterCacheTime < 60000) {
-      return this.mindFilterCache;
-    }
-    const path = this.store.path("MindFilters/default.json");
-    const raw = await this.store.readFile(path);
-    if (!raw.trim()) {
-      const fallback = this.defaultMindFilter();
-      this.mindFilterCache = fallback;
-      this.mindFilterCacheTime = Date.now();
-      return fallback;
-    }
-    try {
-      const parsed = JSON.parse(raw) as Partial<MindFilter>;
-      const filter: MindFilter = {
-        id: typeof parsed.id === "string" ? parsed.id : "default",
-        name: typeof parsed.name === "string" ? parsed.name : "Default",
-        mode: parsed.mode === "factual_replay" || parsed.mode === "gentle_reflection"
-          ? parsed.mode : "gentle_reflection",
-        rules: Array.isArray(parsed.rules) ? parsed.rules.map(String) : ["Don't fabricate facts", "Don't replace real relationships", "Distinguish stored facts, current context, and inferences"]
-      };
-      this.mindFilterCache = filter;
-      this.mindFilterCacheTime = Date.now();
-      return filter;
-    } catch {
-      const fallback = this.defaultMindFilter();
-      this.mindFilterCache = fallback;
-      this.mindFilterCacheTime = Date.now();
-      return fallback;
-    }
-  }
-
-  private defaultMindFilter(): MindFilter {
-    return {
-      id: "default",
-      name: "Default",
-      mode: "gentle_reflection",
-      rules: ["Don't fabricate facts", "Don't replace real relationships", "Distinguish stored facts, current context, and inferences"]
-    };
   }
 
   // L0 history rendered with relevance scoring: each recent message is scored
@@ -571,14 +511,23 @@ function buildEvidenceBoundary(retrieved: RetrievedMemory[], attachedReferences:
   ].join("\n");
 }
 
-function buildVisibleManifest(retrieved: RetrievedMemory[], attachedReferences: AttachedReference[], intent: IntentResult): string {
+function buildVisibleManifest(retrieved: RetrievedMemory[], attachedReferences: AttachedReference[], intent: IntentResult, lang: string): string {
+  if (lang === "zh") {
+    const titles = attachedReferences.map(reference => reference.title).filter(Boolean);
+    const attachedLabel = titles.length ? titles.join("、") : "无";
+    const memoryIds = retrieved.slice(0, 8).map(item => item.memory.id).join("、") || "无";
+    const documentWarning = intent.wantsReference && titles.length === 0
+      ? "｜用户可能在问文档/附件，但本次没有可见附件正文：必须先说看不到原文"
+      : "";
+    return `[可见范围｜检索到的记忆ID：${memoryIds}｜本次附件：${attachedLabel}${documentWarning}｜只引用下文实际出现的证据；没有就说「我没有相关记录」或「我现在看不到原文」，不要编造]`;
+  }
   const titles = attachedReferences.map(reference => reference.title).filter(Boolean);
-  const attachedLabel = titles.length ? titles.join("、") : "无";
-  const memoryIds = retrieved.slice(0, 8).map(item => item.memory.id).join("、") || "无";
+  const attachedLabel = titles.length ? titles.join(", ") : "none";
+  const memoryIds = retrieved.slice(0, 8).map(item => item.memory.id).join(", ") || "none";
   const documentWarning = intent.wantsReference && titles.length === 0
-    ? "｜用户可能在问文档/附件，但本次没有可见附件正文：必须先说看不到原文"
+    ? " | User may be asking about a document/attachment, but no visible attachment text is available: you must say you cannot see the original text"
     : "";
-  return `[可见范围｜检索到的记忆ID：${memoryIds}｜本次附件：${attachedLabel}${documentWarning}｜只引用下文实际出现的证据；没有就说「我没有相关记录」或「我现在看不到原文」，不要编造]`;
+  return `[Visible scope | Retrieved memory IDs: ${memoryIds} | Attached: ${attachedLabel}${documentWarning} | Only cite evidence that actually appears below; if absent, say \"I don't have a relevant record\" or \"I cannot see the original text\" — do not fabricate]`;
 }
 
 const HEADING_QUERY_STOPWORDS = new Set([
