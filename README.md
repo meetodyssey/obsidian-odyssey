@@ -87,10 +87,14 @@ Memory can be wrong: the AI may have misunderstood, you may have misstated somet
 
 ## Privacy
 
-- Conversation and memory records are stored locally as Markdown in your vault.
-- API keys are kept in Obsidian plugin settings, not in the memory directory.
-- The plugin can run fully offline with a local Ollama model.
-- If you use a cloud model provider, conversation requests are sent to that provider.
+Odyssey itself has no server, no account, and no telemetry. Your memory files always stay local as Markdown in your vault.
+
+However, **your model choice determines your privacy boundary:**
+
+- **Local model (Ollama):** Fully offline. Conversation content never leaves your machine.
+- **Cloud model (OpenAI-compatible, Anthropic, etc.):** Conversation turns are sent to that provider's API for inference. Your memory files remain local, but the provider sees the text you send during a conversation.
+
+API keys are kept in Obsidian plugin settings, not in the memory directory.
 
 ## Usage
 
