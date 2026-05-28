@@ -63,16 +63,13 @@ export class RetrievalService {
 
   searchTargetDateSummaries(dates: string[]): RetrievedMemory[] {
     if (!dates.length) return [];
-    const datePaths = dates.map(date => {
-      const [year, month] = date.split("-");
-      return `Conversations/${year}/${month}/${date}.md`;
-    });
     return this.index.memories
       .filter(memory => memory.type === "memory_summary" || memory.type === "raw_memory")
       .filter(memory => memory.status !== "archived")
       .filter(memory => {
-        const anchors = [...memory.source, ...memory.anchors, memory.path];
-        return datePaths.some(datePath => anchors.some(anchor => anchor.includes(datePath)));
+        if (!memory.created) return false;
+        const memDate = memory.created.slice(0, 10);
+        return dates.includes(memDate);
       })
       .map(memory => {
         memory.lastReferenced = nowIso();

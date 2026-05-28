@@ -278,7 +278,21 @@ export class MemoryExtractor {
     if (recentText.length >= 3000) return true;
     if (message.trim().length >= 80) return true;
     if (this.isSelfFactCandidate(message)) return true;
+    if (this.detectTopicSwitch(recentMessages)) return true;
     return includesAny(message, ["remember", "remind me", "note this", "I've been", "I recently", "I realized", "I found that", "to me", "I care about", "summarize", "write this down", "记住", "以后提醒我", "总结一下", "先记下来"]);
+  }
+
+  private detectTopicSwitch(recentMessages: ChatMessage[]): boolean {
+    const userMessages = recentMessages.filter(m => m.role === "user");
+    if (userMessages.length < 6) return false;
+    const recent = userMessages.slice(-3);
+    const earlier = userMessages.slice(0, -3);
+    const recentWords = new Set(recent.flatMap(m => extractKeywords(m.content)));
+    const earlierWords = new Set(earlier.flatMap(m => extractKeywords(m.content)));
+    if (recentWords.size === 0 || earlierWords.size === 0) return false;
+    const intersection = [...recentWords].filter(w => earlierWords.has(w)).length;
+    const overlapRatio = intersection / Math.min(recentWords.size, earlierWords.size);
+    return overlapRatio < 0.2;
   }
 
   private memoryTags(sourceText: string, triggerMessage: string): string[] {

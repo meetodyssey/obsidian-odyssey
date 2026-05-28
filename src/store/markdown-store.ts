@@ -1,9 +1,9 @@
 import { App, normalizePath, TFile } from "obsidian";
 import { createHash } from "crypto";
 import { AgentRecordMeta, ChatMessage, OdysseySettings, RecordLevel } from "../types";
-import { dateParts, dateStamp, nowIso, weekStamp } from "../utils/time";
+import { dateParts, dateStamp, nowIso } from "../utils/time";
 import { makeId } from "../utils/ids";
-import { renderMarkdown } from "../utils/frontmatter";
+import { parseMarkdown, renderMarkdown } from "../utils/frontmatter";
 
 export interface WriteRecordInput {
   meta: AgentRecordMeta;
@@ -23,7 +23,6 @@ export class MarkdownStore {
     await this.migrateLegacyRootIfNeeded();
     const dirs = [
       this.root,
-      this.path("Conversations"),
       this.path("L1_Recent_Memory"),
       this.path("Corrections"),
       this.path("References"),
@@ -36,35 +35,67 @@ export class MarkdownStore {
     await this.ensureFile(this.path("Index/memory-index.json"), JSON.stringify({ memories: [], rebuiltAt: nowIso() }, null, 2));
   }
 
-  async appendConversationMessage(message: ChatMessage): Promise<string> {
-    const path = this.conversationPath();
-    const role = message.role === "user" ? (this.settings.userAvatar || "User") : message.role === "assistant" ? this.settings.odysseyName : "System";
-    const created = message.created ?? nowIso();
-    const block = `\n\n## ${created} ${role}\n\n${message.content.trim()}\n`;
-    await this.appendFile(path, block, `# ${dateStamp()}\n`);
-    return path;
+  async writeConversationTurn(role: ChatMessage["role"], content: string): Promise<string> {
+    const body = `## Conversation Turn\n\n${content.trim()}\n`;
+    return this.writeRawMemory("L1", body, [], ["conversation_turn", role]);
   }
 
-  async readRecentConversationMessages(limit = 80): Promise<ChatMessage[]> {
-    const prefix = this.path("Conversations/");
-    const files = this.app.vault.getMarkdownFiles()
+  async readRecentL1ConversationTurns(limit = 40): Promise<ChatMessage[]> {
+    const prefix = this.path("L1_Recent_Memory/");
+    const files = await this.listMarkdownFiles();
+    const l1Files = files
       .filter(file => normalizePath(file.path).startsWith(prefix))
-      .sort((a, b) => normalizePath(a.path).localeCompare(normalizePath(b.path)));
+      .sort((a, b) => normalizePath(b.path).localeCompare(normalizePath(a.path)));
     const messages: ChatMessage[] = [];
-    for (const file of files) {
-      const content = await this.app.vault.read(file);
-      messages.push(...this.parseConversationMessages(content));
+    for (const file of l1Files) {
+      if (messages.length >= limit) break;
+      try {
+        const content = await this.app.vault.read(file);
+        const parsed = parseMarkdown(content);
+        const tags = Array.isArray(parsed.frontmatter.tags) ? parsed.frontmatter.tags as string[] : [];
+        if (!tags.includes("conversation_turn")) continue;
+        const role = tags.includes("user") ? "user" as const
+          : tags.includes("assistant") ? "assistant" as const
+          : "system" as const;
+        const body = parsed.body.replace(/^## Conversation Turn\n+/i, "").trim();
+        if (!body) continue;
+        messages.unshift({
+          role,
+          content: body,
+          created: typeof parsed.frontmatter.created === "string" ? parsed.frontmatter.created : undefined
+        });
+      } catch { /* skip unreadable files */ }
     }
     return messages.slice(-limit);
   }
 
-  async readConversationMessagesForDate(date: string): Promise<{ path: string; messages: ChatMessage[] } | null> {
-    const [year, month] = date.split("-");
-    if (!year || !month) return null;
-    const path = this.path(`Conversations/${year}/${month}/${date}.md`);
-    const content = await this.readFile(path);
-    if (!content.trim()) return null;
-    return { path, messages: this.parseConversationMessages(content) };
+  async readL1ConversationTurnsForDate(date: string): Promise<{ path: string; messages: ChatMessage[] } | null> {
+    const prefix = this.path(`L1_Recent_Memory/${date.slice(0, 4)}/${date.slice(5, 7)}/`);
+    const files = await this.listMarkdownFiles();
+    const l1Files = files
+      .filter(file => normalizePath(file.path).startsWith(prefix))
+      .sort((a, b) => normalizePath(a.path).localeCompare(normalizePath(b.path)));
+    const messages: ChatMessage[] = [];
+    for (const file of l1Files) {
+      try {
+        const content = await this.app.vault.read(file);
+        const parsed = parseMarkdown(content);
+        const tags = Array.isArray(parsed.frontmatter.tags) ? parsed.frontmatter.tags as string[] : [];
+        if (!tags.includes("conversation_turn")) continue;
+        const role = tags.includes("user") ? "user" as const
+          : tags.includes("assistant") ? "assistant" as const
+          : "system" as const;
+        const body = parsed.body.replace(/^## Conversation Turn\n+/i, "").trim();
+        if (!body) continue;
+        messages.push({
+          role,
+          content: body,
+          created: typeof parsed.frontmatter.created === "string" ? parsed.frontmatter.created : undefined
+        });
+      } catch { /* skip unreadable files */ }
+    }
+    if (!messages.length) return null;
+    return { path: prefix, messages };
   }
 
   async writeRawMemory(level: Exclude<RecordLevel, "L0">, body: string, source: string[], tags: string[] = []): Promise<string> {
@@ -169,13 +200,12 @@ export class MarkdownStore {
 
   async writeConversationExport(messages: ChatMessage[], title = "聊天整理笔记"): Promise<string> {
     const id = makeId("export");
-    const anchors = Array.from(new Set(messages.map(message => this.conversationAnchorFromCreated(message.created)).filter(Boolean)));
     const meta: AgentRecordMeta = {
       id,
       type: "export_bundle",
       created: nowIso(),
-      source: anchors.length ? anchors : ["Odyssey 当前聊天窗口"],
-      anchors,
+      source: ["Odyssey 当前聊天窗口"],
+      anchors: [],
       tags: ["odyssey-export"],
       entities: ["user"],
       confidence: "medium",
@@ -186,7 +216,7 @@ export class MarkdownStore {
       "",
       "## Sources",
       "",
-      ...(anchors.length ? anchors.map(anchor => `- ${anchor}`) : ["- Odyssey chat window"]),
+      "- Odyssey chat window",
       "",
       "## Content",
       "",
@@ -310,11 +340,6 @@ export class MarkdownStore {
     });
   }
 
-  conversationPath(date = new Date()): string {
-    const { year, month } = dateParts(date);
-    return this.path(`Conversations/${year}/${month}/${dateStamp(date)}.md`);
-  }
-
   path(child: string): string {
     return normalizePath(`${this.root}/${child}`);
   }
@@ -337,64 +362,10 @@ export class MarkdownStore {
     return this.path(`Corrections/${year}/${month}/${id}.md`);
   }
 
-  private conversationAnchorFromCreated(created?: string): string {
-    if (!created) return "";
-    const date = new Date(created);
-    if (Number.isNaN(date.getTime())) return "";
-    return this.anchorFor(this.conversationPath(date));
-  }
-
-  private parseConversationMessages(content: string): ChatMessage[] {
-    const headingPattern = /^##\s+(\d{4}-\d{2}-\d{2}T[^\s]+)\s+(.+)$/gm;
-    const headings: Array<{ created: string; label: string; start: number; end: number }> = [];
-    let match: RegExpExecArray | null;
-    while ((match = headingPattern.exec(content)) !== null) {
-      headings.push({
-        created: match[1],
-        label: match[2].trim(),
-        start: match.index,
-        end: headingPattern.lastIndex
-      });
-    }
-    return headings
-      .map((heading, index): ChatMessage | null => {
-        const next = headings[index + 1]?.start ?? content.length;
-        const body = content.slice(heading.end, next).trim();
-        if (!body) return null;
-        return {
-          role: this.roleFromConversationLabel(heading.label),
-          content: body,
-          created: heading.created
-        };
-      })
-      .filter((message): message is ChatMessage => Boolean(message));
-  }
-
-  private roleFromConversationLabel(label: string): ChatMessage["role"] {
-    const normalized = label.trim().toLowerCase();
-    if (["用户", "我", "user", "me"].includes(normalized)) return "user";
-    if (["系统", "system"].includes(normalized)) return "system";
-    return "assistant";
-  }
-
   private async writeRecord(path: string, input: WriteRecordInput): Promise<void> {
     await this.enqueueWrite(async () => {
       await this.ensureParent(path);
       await this.createOrModify(normalizePath(path), renderMarkdown(input.meta as unknown as Record<string, unknown>, input.body));
-    });
-  }
-
-  private async appendFile(path: string, content: string, initial = ""): Promise<void> {
-    await this.enqueueWrite(async () => {
-      await this.ensureParent(path);
-      const normalized = normalizePath(path);
-      const file = this.app.vault.getAbstractFileByPath(normalized);
-      if (file instanceof TFile) {
-        const old = await this.app.vault.read(file);
-        await this.app.vault.modify(file, old + content);
-      } else {
-        await this.createOrModify(normalized, initial + content.trimStart());
-      }
     });
   }
 

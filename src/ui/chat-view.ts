@@ -153,7 +153,7 @@ export class OdysseyChatView extends ItemView {
     root.addEventListener("keydown", () => this.resetAutoLock());
 
     this.locked = this.plugin.settings.lockOnOpen;
-    this.messages = await this.plugin.store.readRecentConversationMessages(40);
+    this.messages = await this.plugin.store.readRecentL1ConversationTurns(40);
     this.plugin.runtime.hydrateRecentMessages(this.messages);
     this.renderLockState();
     this.renderEphemeralState();
@@ -168,7 +168,7 @@ export class OdysseyChatView extends ItemView {
     this.messages = [];
     this.ephemeralMode = false;
     this.ephemeralEpoch += 1;
-    this.plugin.runtime.endSession();
+    await this.plugin.runtime.consolidateOnSessionEnd();
     if (this.autoLockTimer !== undefined) window.clearTimeout(this.autoLockTimer);
   }
 
@@ -379,7 +379,7 @@ export class OdysseyChatView extends ItemView {
         content: `${t("chat_alignmentFeedbackPrefix")}${feedback}`,
         created: new Date().toISOString()
       };
-      const conversationPath = await this.plugin.store.appendConversationMessage(feedbackMessage);
+      const turnId = await this.plugin.store.writeConversationTurn(feedbackMessage.role, feedbackMessage.content);
       this.messages.push(feedbackMessage);
       this.plugin.runtime.hydrateRecentMessages(this.messages);
       const id = await this.plugin.store.writeFeedback(
@@ -387,7 +387,7 @@ export class OdysseyChatView extends ItemView {
         feedbackPrompt.prompt,
         feedbackPrompt.response,
         feedback,
-        [this.plugin.store.anchorFor(conversationPath)]
+        [this.plugin.store.recordAnchor("L1", turnId)]
       );
       this.pendingAlignmentFeedback = null;
       this.plugin.notice(t("chat_alignmentFeedbackSaved", { id }));
@@ -409,9 +409,10 @@ export class OdysseyChatView extends ItemView {
     window.open("https://github.com/meetodyssey/obsidian-odyssey/issues/new/choose", "_blank");
   }
 
-  private lock(): void {
+  private async lock(): Promise<void> {
     this.locked = true;
     this.endEphemeralInterval(true);
+    await this.plugin.runtime.consolidateOnSessionEnd();
     this.renderLockState();
   }
 

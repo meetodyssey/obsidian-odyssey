@@ -7,7 +7,7 @@ function makeStore(conversationResult: any = null) {
     anchorFor: (path: string) => `[[${path}]]`,
     path: (child: string) => `Odyssey/${child}`,
     readFile: async (_path: string) => "",
-    readConversationMessagesForDate: async () => conversationResult
+    readL1ConversationTurnsForDate: async () => conversationResult
   };
 }
 
@@ -117,7 +117,7 @@ describe("context builder source-of-truth rules", () => {
       summary: "User previously said their school major was electrical engineering, later shifted to software architecture.",
       status: "active",
       source: [],
-      anchors: ["[[Odyssey/Conversations/2026/05/2026-05-13.md]]"],
+      anchors: ["[[Odyssey/L1_Recent_Memory/2026/05/mem_test001.md]]"],
       correctionLinks: [],
       entities: [],
       confidence: "medium"
@@ -150,7 +150,7 @@ describe("context builder source-of-truth rules", () => {
       summary: "User mentioned a conference talk direction and that Horizon may relate to distributed systems.",
       status: "active",
       source: [],
-      anchors: ["[[Odyssey/Conversations/2026/05/2026-05-13.md]]"],
+      anchors: ["[[Odyssey/L1_Recent_Memory/2026/05/mem_test001.md]]"],
       correctionLinks: [],
       entities: ["user"],
       confidence: "medium"
@@ -191,13 +191,13 @@ describe("context builder source-of-truth rules", () => {
       summary: "User was both excited and frustrated - excited about a new project idea, frustrated by limited team resources.",
       status: "active",
       source: [],
-      anchors: ["[[Odyssey/Conversations/2026/05/2026-05-13.md]]"],
+      anchors: ["[[Odyssey/L1_Recent_Memory/2026/05/mem_test001.md]]"],
       correctionLinks: [],
       entities: [],
       confidence: "medium"
     };
     const store = makeStore({
-      path: "Odyssey/Conversations/2026/05/2026-05-13.md",
+      path: "Odyssey/L1_Recent_Memory/2026/05/mem_test001.md",
       messages: [
         {
           role: "user" as const,

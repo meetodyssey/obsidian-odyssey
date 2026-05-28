@@ -30,6 +30,7 @@ export class PluginLocalRuntime implements AgentRuntime {
   private charsSinceConsolidation = 0;
   private turnsSinceL0Compaction = 0;
   private charsSinceL0Compaction = 0;
+  private l1PersistedCount = 0;
 
   constructor(
     private readonly getSettings: () => OdysseySettings,
@@ -44,6 +45,16 @@ export class PluginLocalRuntime implements AgentRuntime {
 
   hydrateRecentMessages(messages: ChatMessage[]): void {
     this.recentMessages = messages.map(message => ({ ...message, ephemeral: false })).slice(-40);
+    this.l1PersistedCount = this.recentMessages.length;
+  }
+
+  async consolidateOnSessionEnd(): Promise<void> {
+    const toPersist = this.recentMessages.slice(this.l1PersistedCount).filter(m => !m.ephemeral && m.role !== "system");
+    for (const msg of toPersist.slice(-12)) {
+      await this.store.writeConversationTurn(msg.role, msg.content);
+    }
+    this.l1PersistedCount = this.recentMessages.length;
+    this.endSession();
   }
 
   endSession(): void {
@@ -56,7 +67,7 @@ export class PluginLocalRuntime implements AgentRuntime {
     const ephemeral = input.ephemeral === true;
     const lang = detectLanguage(input.message);
     const userMessage: ChatMessage = { role: "user", content: input.message, created: nowIso(), ephemeral };
-    const conversationPath = ephemeral ? "" : await this.store.appendConversationMessage(userMessage);
+    let conversationPath = "";
     this.recentMessages.push(userMessage);
 
     const confirmedCorrections = ephemeral ? [] : await this.correctionDetector.maybeWritePendingCorrection(input.message);
@@ -74,7 +85,6 @@ export class PluginLocalRuntime implements AgentRuntime {
     for (let turn = 0; turn <= maxContinuationTurns; turn++) {
       const completion = await this.modelGateway.complete("chat", modelMessages);
       const assistantMessage: ChatMessage = { role: "assistant", content: completion.content, created: nowIso(), ephemeral };
-      if (!ephemeral) await this.store.appendConversationMessage(assistantMessage);
       this.recentMessages.push(assistantMessage);
       assistantMessages.push(assistantMessage);
 
@@ -119,6 +129,12 @@ export class PluginLocalRuntime implements AgentRuntime {
     if (!ephemeral && shouldConsolidate) {
       this.turnsSinceConsolidation = 0;
       this.charsSinceConsolidation = 0;
+      const toPersist = this.recentMessages.slice(this.l1PersistedCount).filter(m => !m.ephemeral && m.role !== "system");
+      for (const msg of toPersist.slice(-12)) {
+        const id = await this.store.writeConversationTurn(msg.role, msg.content);
+        if (!conversationPath) conversationPath = this.store.rawMemoryPath("L1", id);
+      }
+      this.l1PersistedCount = this.recentMessages.length;
     }
 
     this.enqueuePostResponseWork({

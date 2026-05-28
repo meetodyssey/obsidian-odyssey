@@ -449,7 +449,7 @@ export class ContextBuilder {
     if (!dates.length) return "";
     const sections: string[] = [];
     for (const date of dates.slice(0, 2)) {
-      const result = await this.store.readConversationMessagesForDate(date);
+      const result = await this.store.readL1ConversationTurnsForDate(date);
       if (!result || result.messages.length === 0) {
         sections.push(`### ${date}\nNo original conversation found for this date.`);
         continue;
@@ -634,16 +634,14 @@ function extractContextKeywords(messages: ChatMessage[]): string[] {
   )).slice(0, 20);
 }
 
-// Extract dates (YYYY-MM-DD) from memory source/anchors that point to
-// conversation files, so recall mode can include original conversation text.
+// Extract dates (YYYY-MM-DD) from memory metadata, so recall mode can
+// include original conversation text from L1 records.
 function extractSourceDates(memories: RetrievedMemory[]): string[] {
-  const pattern = /Conversations\/(\d{4})\/(\d{2})\/(\d{4}-\d{2}-\d{2})\.md/;
   const dates = new Set<string>();
   for (const item of memories.slice(0, 10)) {
-    const anchors = [...item.memory.source, ...item.memory.anchors];
-    for (const anchor of anchors) {
-      const match = anchor.match(pattern);
-      if (match) dates.add(match[3]);
+    if (item.memory.created) {
+      const date = item.memory.created.slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date)) dates.add(date);
     }
   }
   return Array.from(dates).slice(0, 3);
