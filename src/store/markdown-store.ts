@@ -23,6 +23,7 @@ export class MarkdownStore {
     await this.migrateLegacyRootIfNeeded();
     const dirs = [
       this.root,
+      this.path("Conversations"),
       this.path("L1_Recent_Memory"),
       this.path("Corrections"),
       this.path("References"),
@@ -36,66 +37,56 @@ export class MarkdownStore {
   }
 
   async writeConversationTurn(role: ChatMessage["role"], content: string): Promise<string> {
+    const id = makeId("turn");
+    const meta: AgentRecordMeta = {
+      id,
+      type: "conversation",
+      created: nowIso(),
+      tags: ["conversation_turn", role],
+      entities: ["user"],
+      confidence: "medium",
+      status: "active"
+    };
     const body = `## Conversation Turn\n\n${content.trim()}\n`;
-    return this.writeRawMemory("L1", body, [], ["conversation_turn", role]);
+    await this.writeRecord(this.conversationTurnPath(id), { meta, body });
+    return id;
   }
 
   async readRecentL1ConversationTurns(limit = 40): Promise<ChatMessage[]> {
-    const prefix = this.path("L1_Recent_Memory/");
     const files = await this.listMarkdownFiles();
-    const l1Files = files
-      .filter(file => normalizePath(file.path).startsWith(prefix))
-      .sort((a, b) => normalizePath(b.path).localeCompare(normalizePath(a.path)));
-    const messages: ChatMessage[] = [];
-    for (const file of l1Files) {
-      if (messages.length >= limit) break;
+    const conversationFiles = files
+      .filter(file => this.isConversationTurnCandidatePath(file.path))
+      .sort((a, b) => normalizePath(a.path).localeCompare(normalizePath(b.path)));
+    const entries: Array<ChatMessage & { path: string }> = [];
+    for (const file of conversationFiles) {
       try {
-        const content = await this.app.vault.read(file);
-        const parsed = parseMarkdown(content);
-        const tags = Array.isArray(parsed.frontmatter.tags) ? parsed.frontmatter.tags as string[] : [];
-        if (!tags.includes("conversation_turn")) continue;
-        const role = tags.includes("user") ? "user" as const
-          : tags.includes("assistant") ? "assistant" as const
-          : "system" as const;
-        const body = parsed.body.replace(/^## Conversation Turn\n+/i, "").trim();
-        if (!body) continue;
-        messages.unshift({
-          role,
-          content: body,
-          created: typeof parsed.frontmatter.created === "string" ? parsed.frontmatter.created : undefined
-        });
+        const entry = await this.readConversationTurnFile(file);
+        if (entry) entries.push(entry);
       } catch { /* skip unreadable files */ }
     }
-    return messages.slice(-limit);
+    return entries
+      .sort((a, b) => conversationSortKey(a).localeCompare(conversationSortKey(b)))
+      .slice(-limit)
+      .map(({ path: _path, ...message }) => message);
   }
 
   async readL1ConversationTurnsForDate(date: string): Promise<{ path: string; messages: ChatMessage[] } | null> {
-    const prefix = this.path(`L1_Recent_Memory/${date.slice(0, 4)}/${date.slice(5, 7)}/`);
     const files = await this.listMarkdownFiles();
-    const l1Files = files
-      .filter(file => normalizePath(file.path).startsWith(prefix))
+    const conversationFiles = files
+      .filter(file => this.isConversationTurnCandidatePath(file.path, date))
       .sort((a, b) => normalizePath(a.path).localeCompare(normalizePath(b.path)));
-    const messages: ChatMessage[] = [];
-    for (const file of l1Files) {
+    const entries: Array<ChatMessage & { path: string }> = [];
+    for (const file of conversationFiles) {
       try {
-        const content = await this.app.vault.read(file);
-        const parsed = parseMarkdown(content);
-        const tags = Array.isArray(parsed.frontmatter.tags) ? parsed.frontmatter.tags as string[] : [];
-        if (!tags.includes("conversation_turn")) continue;
-        const role = tags.includes("user") ? "user" as const
-          : tags.includes("assistant") ? "assistant" as const
-          : "system" as const;
-        const body = parsed.body.replace(/^## Conversation Turn\n+/i, "").trim();
-        if (!body) continue;
-        messages.push({
-          role,
-          content: body,
-          created: typeof parsed.frontmatter.created === "string" ? parsed.frontmatter.created : undefined
-        });
+        const entry = await this.readConversationTurnFile(file);
+        if (entry) entries.push(entry);
       } catch { /* skip unreadable files */ }
     }
+    const messages = entries
+      .sort((a, b) => conversationSortKey(a).localeCompare(conversationSortKey(b)))
+      .map(({ path: _path, ...message }) => message);
     if (!messages.length) return null;
-    return { path: prefix, messages };
+    return { path: this.path(`Conversations/${date.slice(0, 4)}/${date.slice(5, 7)}/`), messages };
   }
 
   async writeRawMemory(level: Exclude<RecordLevel, "L0">, body: string, source: string[], tags: string[] = []): Promise<string> {
@@ -119,6 +110,11 @@ export class MarkdownStore {
 
   rawMemoryPath(level: Exclude<RecordLevel, "L0">, id: string): string {
     return this.recordPath(level, id);
+  }
+
+  conversationTurnPath(id: string): string {
+    const { year, month } = datePartsFromId(id) ?? dateParts();
+    return this.path(`Conversations/${year}/${month}/${id}.md`);
   }
 
   async writeMemorySummary(level: Exclude<RecordLevel, "L0">, summary: string, anchors: string[], tags: string[] = [], _priority: "low" | "normal" | "high" = "high"): Promise<string> {
@@ -228,6 +224,137 @@ export class MarkdownStore {
     const path = this.path(`Exports/${dateStamp()}-${id}.md`);
     await this.writeRecord(path, { meta, body });
     return path;
+  }
+
+  async exportAllMemories(
+    onProgress?: (phase: string, current: number, total: number) => void
+  ): Promise<{ path: string; stats: { conversationCount: number; turnCount: number; memoryCount: number; byType: Record<string, number> } }> {
+    const files = await this.listMarkdownFiles();
+    const total = files.length;
+
+    interface ExportedTurn {
+      turnId: string;
+      role: "user" | "assistant" | "system";
+      content: string;
+      timestamp: string;
+    }
+    interface ExportedConversation {
+      conversationId: string;
+      turns: ExportedTurn[];
+      startedAt: string;
+      lastTurnAt: string;
+    }
+    interface ExportedMemory {
+      id: string;
+      type: string;
+      level: string;
+      title: string;
+      content: string;
+      tags: string[];
+      createdAt: string;
+      confidence?: string;
+      status?: string;
+      source?: string[];
+    }
+
+    const conversationTurns = new Map<string, ExportedTurn[]>();
+    const memories: ExportedMemory[] = [];
+    const byType: Record<string, number> = {};
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      onProgress?.("Reading files", i + 1, total);
+
+      let parsed: { frontmatter: Record<string, unknown>; body: string };
+      try {
+        const raw = await this.app.vault.read(file);
+        parsed = parseMarkdown(raw);
+      } catch {
+        continue;
+      }
+
+      const fm = parsed.frontmatter;
+      const type = String(fm.type ?? "raw_memory");
+      const id = String(fm.id ?? file.basename);
+      const tags = Array.isArray(fm.tags) ? fm.tags.map(String) : [];
+      byType[type] = (byType[type] ?? 0) + 1;
+
+      const isConversationTurn = tags.includes("conversation_turn");
+
+      if (isConversationTurn) {
+        const convId = tags.find(t => t.startsWith("conv_"))
+          ?? `session_${String(fm.created ?? "").slice(0, 10)}`;
+        const role = tags.includes("user") ? "user" as const
+          : tags.includes("assistant") ? "assistant" as const
+          : "system" as const;
+        const body = parsed.body
+          .replace(/^#\s+.*\n+/m, "")
+          .replace(/^## Conversation Turn\n+/i, "")
+          .trim();
+        if (!body) continue;
+
+        const turn: ExportedTurn = {
+          turnId: id,
+          role,
+          content: body,
+          timestamp: String(fm.created ?? "")
+        };
+
+        if (!conversationTurns.has(convId)) conversationTurns.set(convId, []);
+        conversationTurns.get(convId)!.push(turn);
+      } else {
+        const body = parsed.body.replace(/^#\s+.*\n+/m, "").trim();
+        const title = parsed.body.match(/^#\s+(.+)/m)?.[1] ?? file.basename;
+        memories.push({
+          id,
+          type,
+          level: String(fm.level ?? "L1"),
+          title,
+          content: body,
+          tags,
+          createdAt: String(fm.created ?? ""),
+          confidence: fm.confidence ? String(fm.confidence) : undefined,
+          status: fm.status ? String(fm.status) : undefined,
+          source: Array.isArray(fm.source) ? fm.source.map(String) : undefined
+        });
+      }
+    }
+
+    // Sort turns within each conversation by timestamp
+    const conversations: ExportedConversation[] = [];
+    for (const [convId, turns] of conversationTurns) {
+      turns.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      conversations.push({
+        conversationId: convId,
+        turns,
+        startedAt: turns[0]?.timestamp ?? "",
+        lastTurnAt: turns[turns.length - 1]?.timestamp ?? ""
+      });
+    }
+    conversations.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+
+    const turnCount = Array.from(conversationTurns.values()).reduce((s, t) => s + t.length, 0);
+
+    const bundle = {
+      version: "1.0" as const,
+      exportedAt: nowIso(),
+      conversations,
+      memories,
+      stats: {
+        conversationCount: conversations.length,
+        turnCount,
+        memoryCount: memories.length,
+        byType
+      }
+    };
+
+    const json = JSON.stringify(bundle, null, 2);
+    const stamp = dateStamp();
+    const exportId = makeId("memexport");
+    const path = this.path(`Exports/${stamp}-${exportId}.json`);
+    await this.writeTextFile(path, json);
+
+    return { path, stats: bundle.stats };
   }
 
   async writeFeedback(kind: string, prompt: string, response: string, feedback: string, anchors: string[] = []): Promise<string> {
@@ -340,6 +467,37 @@ export class MarkdownStore {
     });
   }
 
+  private isConversationTurnCandidatePath(path: string, date?: string): boolean {
+    const normalized = normalizePath(path);
+    const year = date?.slice(0, 4);
+    const month = date?.slice(5, 7);
+    const modernPrefix = date
+      ? this.path(`Conversations/${year}/${month}/`)
+      : this.path("Conversations/");
+    const legacyPrefix = date
+      ? this.path(`L1_Recent_Memory/${year}/${month}/`)
+      : this.path("L1_Recent_Memory/");
+    return normalized.startsWith(modernPrefix) || normalized.startsWith(legacyPrefix);
+  }
+
+  private async readConversationTurnFile(file: TFile): Promise<(ChatMessage & { path: string }) | null> {
+    const content = await this.readFile(file.path);
+    const parsed = parseMarkdown(content);
+    const tags = Array.isArray(parsed.frontmatter.tags) ? parsed.frontmatter.tags as string[] : [];
+    if (!tags.includes("conversation_turn")) return null;
+    const role = tags.includes("user") ? "user" as const
+      : tags.includes("assistant") ? "assistant" as const
+      : "system" as const;
+    const body = parsed.body.replace(/^## Conversation Turn\n+/i, "").trim();
+    if (!body) return null;
+    return {
+      role,
+      content: body,
+      created: typeof parsed.frontmatter.created === "string" ? parsed.frontmatter.created : undefined,
+      path: normalizePath(file.path)
+    };
+  }
+
   path(child: string): string {
     return normalizePath(`${this.root}/${child}`);
   }
@@ -353,7 +511,7 @@ export class MarkdownStore {
   }
 
   private recordPath(level: Exclude<RecordLevel, "L0">, id: string): string {
-    const { year, month } = dateParts();
+    const { year, month } = datePartsFromId(id) ?? dateParts();
     return this.path(`L1_Recent_Memory/${year}/${month}/${id}.md`);
   }
 
@@ -463,6 +621,16 @@ function isAlreadyExistsError(error: unknown): boolean {
 function isMarkdownFile(file: TFile): boolean {
   const path = normalizePath(file.path).toLowerCase();
   return path.endsWith(".md") || file.extension === "md" || file.extension === "markdown";
+}
+
+function conversationSortKey(entry: { created?: string; path: string }): string {
+  return `${entry.created ?? ""}|${entry.path}`;
+}
+
+function datePartsFromId(id: string): { year: string; month: string } | null {
+  const match = id.match(/^[a-z]+_(\d{4})(\d{2})\d{2}_/i);
+  if (!match) return null;
+  return { year: match[1], month: match[2] };
 }
 
 function stableId(input: string): string {

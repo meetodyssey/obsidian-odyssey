@@ -88,6 +88,25 @@ export default class OdysseyPlugin extends Plugin {
       name: t("commands_arrangeWorkspace"),
       callback: () => this.arrangeWorkspace()
     });
+    this.addCommand({
+      id: "export-all-memories",
+      name: t("commands_exportAllMemories"),
+      callback: async () => {
+        this.notice(t("memoryExport_starting"));
+        try {
+          const { path, stats } = await this.store.exportAllMemories();
+          this.notice(t("memoryExport_success", {
+            path,
+            conversations: stats.conversationCount,
+            turns: stats.turnCount,
+            memories: stats.memoryCount
+          }));
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          this.notice(t("memoryExport_failed", { error: detail }));
+        }
+      }
+    });
     this.registerEvent(this.app.workspace.on("file-open", file => this.guardProtectedMemoryFile(file)));
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => this.addProtectedFileMenu(menu, file)));
     await this.registerRibbonIcon();

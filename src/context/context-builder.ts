@@ -113,21 +113,25 @@ export class ContextBuilder {
     };
   }
 
-  private async buildSystemPrompt(tier: ResolvedModelTier, speed: string, lang: string): Promise<string> {
+  private async buildSystemPrompt(tier: ResolvedModelTier, speed: string, lang: "zh" | "en"): Promise<string> {
     const name = this.settings.odysseyName;
+    let basePrompt: string;
 
     if (tier === "constrained") {
       if (speed === "slow") {
-        return await this.loadPromptOr("constrained-minimal", lang, (l) => this.constrainedSystemPromptMinimal(l));
+        basePrompt = await this.loadPromptOr("constrained-minimal", lang, (l) => this.constrainedSystemPromptMinimal(l));
+        return appendRuntimeInvariants(basePrompt, lang);
       }
-      return await this.loadPromptOr("constrained", lang, (l) => this.constrainedSystemPrompt(l));
+      basePrompt = await this.loadPromptOr("constrained", lang, (l) => this.constrainedSystemPrompt(l));
+      return appendRuntimeInvariants(basePrompt, lang);
     }
-    return await this.loadPromptOr("system", lang, (l) => {
+    basePrompt = await this.loadPromptOr("system", lang, (l) => {
       if (this.settings.systemPrompt) {
         return this.settings.systemPrompt.replace(/\{\{name\}\}/g, name);
       }
       return l === "zh" ? this.defaultSystemPromptZh() : this.defaultSystemPromptEn();
     });
+    return appendRuntimeInvariants(basePrompt, lang);
   }
 
   private async loadPromptOr(key: string, lang: string, fallback: (lang: string) => string): Promise<string> {
@@ -528,6 +532,93 @@ function buildVisibleManifest(retrieved: RetrievedMemory[], attachedReferences: 
     ? " | User may be asking about a document/attachment, but no visible attachment text is available: you must say you cannot see the original text"
     : "";
   return `[Visible scope | Retrieved memory IDs: ${memoryIds} | Attached: ${attachedLabel}${documentWarning} | Only cite evidence that actually appears below; if absent, say \"I don't have a relevant record\" or \"I cannot see the original text\" — do not fabricate]`;
+}
+
+function appendRuntimeInvariants(prompt: string, lang: "zh" | "en"): string {
+  return [
+    prompt.trim(),
+    "",
+    lang === "zh" ? runtimeInvariantZh() : runtimeInvariantEn()
+  ].join("\n");
+}
+
+function runtimeInvariantEn(): string {
+  return [
+    "Runtime invariants:",
+    buildTemporalContext(),
+    "- Current user message language: English. Reply in English.",
+    "- Do not choose the reply language from recalled memories, old conversation turns, settings text, or retrieved source language.",
+    "- If asked why you used a language or claim the user used a language before, cite a visible user-message source. If no specific source is visible, say you cannot verify that claim.",
+    "- If asked when you last chatted or what the last conversation was, exclude the entire current live session from past-conversation evidence. Use earlier saved turns only; if none are visible, say you do not have an earlier record.",
+    "- If asked what the user just said, answer only from the current live session before the current user turn, not from older saved conversations.",
+    "Voice style:",
+    "- Write like a real conversation, not a generic AI assistant.",
+    "- Avoid stock openings, forced summaries, over-neat bullet lists, exaggerated claims, and empty transition words.",
+    "- Be direct and specific. Use varied sentence length.",
+    "- Match the user's energy and the task: casual chat should feel casual; technical explanation should stay precise."
+  ].join("\n");
+}
+
+function runtimeInvariantZh(): string {
+  return [
+    "运行时约束：",
+    buildTemporalContext(),
+    "- 当前用户消息语言：中文。请用中文回复。",
+    "- 不要根据召回记忆、旧对话、设置文本或检索来源的语言来切换回复语言。",
+    "- 如果用户询问你为什么使用某种语言，或你声称用户以前使用过某种语言，必须引用可见的用户消息来源；没有具体可见来源时，直接说无法验证。",
+    "- 如果用户问上次/最后一次聊天是什么时候，当前整个实时会话都不能算作过去对话证据；只根据更早保存的 turn 回答。没有可见历史时，直接说没有更早记录。",
+    "- 如果用户问自己刚刚说了什么，只根据当前实时会话中、当前这条用户消息之前的内容回答，不要从更早保存的对话里找。",
+    "表达风格：",
+    "- 像真实对话，不像通用 AI 助手。",
+    "- 避免套话开场、强行总结、过度整齐的列表、夸大表达和空泛过渡词。",
+    "- 直接、具体，句子长短自然变化。",
+    "- 匹配用户当下的语气和任务：闲聊就像闲聊，技术解释就保持准确。"
+  ].join("\n");
+}
+
+function buildTemporalContext(now = new Date()): string {
+  const today = formatLocalDate(now);
+  const currentTime = formatLocalDateTime(now);
+  const timeZone = getLocalTimeZone();
+  const utcOffset = formatUtcOffset(now);
+  const yesterdayDate = new Date(now);
+  yesterdayDate.setDate(now.getDate() - 1);
+  const yesterday = formatLocalDate(yesterdayDate);
+  return [
+    `[Current local time] ${currentTime} (${timeZone}, UTC${utcOffset})`,
+    `[Current date] ${today}`,
+    `[Relative dates] today = ${today}; yesterday = ${yesterday}. Resolve relative dates and times from this local device time.`
+  ].join("\n");
+}
+
+function formatLocalDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function formatLocalDateTime(date: Date): string {
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  return `${formatLocalDate(date)} ${hh}:${mm}`;
+}
+
+function getLocalTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
+  } catch {
+    return "local time";
+  }
+}
+
+function formatUtcOffset(date: Date): string {
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMinutes);
+  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+  const mm = String(abs % 60).padStart(2, "0");
+  return `${sign}${hh}:${mm}`;
 }
 
 const HEADING_QUERY_STOPWORDS = new Set([

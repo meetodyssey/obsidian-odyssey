@@ -91,12 +91,22 @@ const en = {
 
   // Export
   chat_exportDefaultTitle: "Odyssey chat notes",
+  chat_memoryExportButtonLabel: "Export all memories as JSON",
+  chat_memoryExportButtonTitle: "Export all conversations and memories to a JSON file. Conversations are the source of truth.",
+
+  // Memory export
+  memoryExport_starting: "Exporting memories...",
+  memoryExport_success: "Exported to {{path}}: {{conversations}} conversations ({{turns}} turns) + {{memories}} memories",
+  memoryExport_failed: "Memory export failed: {{error}}",
+
+  // Commands
+  commands_exportAllMemories: "Export all memories as JSON",
 
   // Settings page
   settings_heading: "Odyssey",
   settings_description: "All native memories are read and indexed only within the Odyssey working directory in the current Vault. Avoid manually editing Odyssey memory files; use conversation corrections instead. Requests are sent to your configured model provider when using cloud models.",
   settings_rootDirName: "Working directory",
-  settings_rootDirDesc: "Default: Odyssey. L1 memories, corrections, references, exports, and indexes are read and written only within this directory. Do not set this to .obsidian/plugins.",
+  settings_rootDirDesc: "Default: Odyssey. Conversations, L1 memories, corrections, references, exports, and indexes are read and written only within this directory. Do not set this to .obsidian/plugins.",
   settings_odysseyNameName: "Odyssey name",
   settings_odysseyNameDesc: "Used in chat bubbles, conversation records, and system prompts. Can be Odyssey or any name you prefer.",
   settings_userAvatarName: "My avatar",

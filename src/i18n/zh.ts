@@ -93,12 +93,22 @@ export const zh: Partial<Record<LocaleKey, string>> = {
 
   // Export
   chat_exportDefaultTitle: "Odyssey 聊天整理",
+  chat_memoryExportButtonLabel: "导出全部记忆为 JSON",
+  chat_memoryExportButtonTitle: "将所有对话和记忆导出为 JSON 文件。原始对话是 source of truth。",
+
+  // Memory export
+  memoryExport_starting: "正在导出记忆...",
+  memoryExport_success: "已导出至 {{path}}：{{conversations}} 段对话（{{turns}} 轮）+ {{memories}} 条记忆",
+  memoryExport_failed: "记忆导出失败：{{error}}",
+
+  // Commands
+  commands_exportAllMemories: "导出全部记忆为 JSON",
 
   // Settings page
   settings_heading: "Odyssey",
   settings_description: "所有原生记忆只在当前 Vault 的 Odyssey 工作目录内读写和索引。请尽量不要手动修改 Odyssey 记忆文件；需要修正时直接在对话里指出。使用云端模型时，请求会发送到你配置的模型服务商。",
   settings_rootDirName: "Odyssey 工作目录",
-  settings_rootDirDesc: "默认 Odyssey。原生对话、L1 记忆、修正、Reference、导出和索引都只在这个目录内读写。不要填写 .obsidian/plugins 目录。",
+  settings_rootDirDesc: "默认 Odyssey。Conversations 原始对话、L1 记忆、修正、Reference、导出和索引都只在这个目录内读写。不要填写 .obsidian/plugins 目录。",
   settings_odysseyNameName: "Odyssey 名称",
   settings_odysseyNameDesc: "用于聊天气泡、对话记录和系统提示。可以叫 Odyssey、奥德赛，或你喜欢的名字。",
   settings_userAvatarName: "我的头像",

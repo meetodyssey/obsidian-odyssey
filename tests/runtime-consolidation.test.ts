@@ -96,6 +96,79 @@ describe("runtime auto continuation", () => {
   });
 });
 
+describe("runtime context construction", () => {
+  function makeRuntimeCapturingContext(capture: (recentMessages: any[]) => void): PluginLocalRuntime {
+    const contextBuilder = {
+      build: async (_message: string, recentMessages: any[]) => {
+        capture(recentMessages);
+        return {
+          messages: [
+            { role: "system", content: "system" },
+            { role: "user", content: "question" }
+          ],
+          referencedMemoryIds: [],
+          retrievedMemories: [],
+          report: {
+            modelContextLimit: 1000,
+            estimatedInputChars: 0,
+            reservedOutputTokens: 0,
+            sections: {},
+            droppedSections: []
+          },
+          warnings: []
+        };
+      }
+    };
+    return new PluginLocalRuntime(
+      () => ({ ...DEFAULT_SETTINGS, autoExtractMemories: false }),
+      {} as any,
+      { refreshPaths: async () => undefined } as any,
+      { analyze: () => ({ mode: "recall", keywords: ["remember"], hasExplicitTimeHint: false }) } as any,
+      contextBuilder as any,
+      { complete: async () => ({ content: "Answer.", outputLimited: false }) } as any,
+      {} as any,
+      {
+        maybeWritePendingCorrection: async () => [],
+        holdCorrectionIntent: () => undefined
+      } as any
+    );
+  }
+
+  it("excludes the current live session for last-conversation questions", async () => {
+    let capturedRecentMessages: any[] = [];
+    const runtime = makeRuntimeCapturingContext(messages => { capturedRecentMessages = messages; });
+    runtime.hydrateRecentMessages([
+      { role: "user", content: "Earlier saved question", created: "2026-06-05T10:00:00.000Z" },
+      { role: "assistant", content: "Earlier saved answer", created: "2026-06-05T10:00:05.000Z" }
+    ]);
+    await runtime.sendMessage({ message: "Start of this live session." });
+
+    await runtime.sendMessage({ message: "Do you remember when we chat last time?" });
+
+    expect(capturedRecentMessages.map(message => message.content)).toEqual([
+      "Earlier saved question",
+      "Earlier saved answer"
+    ]);
+  });
+
+  it("uses only current live-session history for just-said questions", async () => {
+    let capturedRecentMessages: any[] = [];
+    const runtime = makeRuntimeCapturingContext(messages => { capturedRecentMessages = messages; });
+    runtime.hydrateRecentMessages([
+      { role: "user", content: "Older saved question", created: "2026-06-05T10:00:00.000Z" },
+      { role: "assistant", content: "Older saved answer", created: "2026-06-05T10:00:05.000Z" }
+    ]);
+    await runtime.sendMessage({ message: "This live-session topic is model presets." });
+
+    await runtime.sendMessage({ message: "What did I just say?" });
+
+    expect(capturedRecentMessages.map(message => message.content)).toEqual([
+      "This live-session topic is model presets.",
+      "Answer."
+    ]);
+  });
+});
+
 describe("runtime memory extraction status", () => {
   it("uses rule fallback when the extraction probe has not passed", () => {
     const runtime = makeRuntimeWithSettings({ extractionModelProbeStatus: "failed" }) as any;

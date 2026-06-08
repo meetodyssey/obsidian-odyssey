@@ -86,6 +86,24 @@ export class OdysseyChatView extends ItemView {
       const path = await this.plugin.store.writeConversationExport(selected, t("chat_exportDefaultTitle"));
       this.plugin.notice(t("chat_exportSuccess", { path }));
     };
+    const memExportButton = actions.createEl("button", { attr: { "aria-label": t("chat_memoryExportButtonLabel"), title: t("chat_memoryExportButtonTitle") } });
+    setIcon(memExportButton, "database");
+    memExportButton.onclick = async () => {
+      if (this.locked) return;
+      this.plugin.notice(t("memoryExport_starting"));
+      try {
+        const { path, stats } = await this.plugin.store.exportAllMemories();
+        this.plugin.notice(t("memoryExport_success", {
+          path,
+          conversations: stats.conversationCount,
+          turns: stats.turnCount,
+          memories: stats.memoryCount
+        }));
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        this.plugin.notice(t("memoryExport_failed", { error: detail }));
+      }
+    };
     const alignmentButton = actions.createEl("button", { attr: { "aria-label": t("chat_alignmentButtonLabel"), title: t("chat_alignmentButtonTitle") } });
     setIcon(alignmentButton, "badge-check");
     alignmentButton.onclick = () => this.startAlignmentTest();

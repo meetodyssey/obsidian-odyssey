@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ContextBuilder } from "../src/context/context-builder";
 import { DEFAULT_SETTINGS, IndexedMemory } from "../src/types";
 
@@ -18,6 +18,13 @@ function makeRetrieval(searchResults: any[] = [], dateSummaries: any[] = []) {
   };
 }
 
+function localDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 describe("context builder source-of-truth rules", () => {
   it("establishes Odyssey as a companion with a clear role", async () => {
     const store = makeStore();
@@ -34,6 +41,77 @@ describe("context builder source-of-truth rules", () => {
     expect(system).toContain("digital companion");
     expect(system).toContain("Rules:");
     expect(system).toContain("Answer only from the provided context");
+  });
+
+  it("injects current local time into the runtime system prompt", async () => {
+    const now = new Date("2026-06-04T11:23:00+08:00");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    try {
+      const store = makeStore();
+      const retrieval = makeRetrieval();
+      const builder = new ContextBuilder({ ...DEFAULT_SETTINGS, modelTier: "frontier" }, store as any, retrieval as any);
+
+      const context = await builder.build("What time is it now?", [], {
+        mode: "normal_chat",
+        keywords: ["time"],
+        hasExplicitTimeHint: false
+      });
+      const system = context.messages[0].content;
+      const today = localDate(now);
+      const yesterdayDate = new Date(now);
+      yesterdayDate.setDate(now.getDate() - 1);
+
+      expect(system).toMatch(/\[Current local time\] \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(.+ UTC[+-]\d{2}:\d{2}\)/);
+      expect(system).toContain(`[Current date] ${today}`);
+      expect(system).toContain(`yesterday = ${localDate(yesterdayDate)}`);
+      expect(system).toContain("Resolve relative dates and times from this local device time.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the current user language as a runtime invariant even with a custom prompt", async () => {
+    const store = makeStore();
+    const retrieval = makeRetrieval();
+    const builder = new ContextBuilder({
+      ...DEFAULT_SETTINGS,
+      modelTier: "frontier",
+      systemPrompt: "Always answer in Chinese."
+    }, store as any, retrieval as any);
+
+    const context = await builder.build("Why did you suddenly answer in Chinese?", [], {
+      mode: "normal_chat",
+      keywords: ["language", "Chinese"],
+      hasExplicitTimeHint: false
+    });
+    const system = context.messages[0].content;
+
+    expect(system).toContain("Always answer in Chinese.");
+    expect(system).toContain("Current user message language: English. Reply in English.");
+    expect(system).toContain("Do not choose the reply language from recalled memories");
+    expect(system).toContain("If no specific source is visible, say you cannot verify that claim.");
+    expect(system).toContain("exclude the entire current live session from past-conversation evidence");
+    expect(system).toContain("If asked what the user just said, answer only from the current live session");
+    expect(system).toContain("Write like a real conversation, not a generic AI assistant.");
+    expect(system).toContain("Avoid stock openings, forced summaries, over-neat bullet lists");
+  });
+
+  it("adds the lightweight human voice style invariant for Chinese replies", async () => {
+    const store = makeStore();
+    const retrieval = makeRetrieval();
+    const builder = new ContextBuilder({ ...DEFAULT_SETTINGS, modelTier: "frontier" }, store as any, retrieval as any);
+
+    const context = await builder.build("你怎么看这个问题？", [], {
+      mode: "normal_chat",
+      keywords: ["问题"],
+      hasExplicitTimeHint: false
+    });
+    const system = context.messages[0].content;
+
+    expect(system).toContain("表达风格：");
+    expect(system).toContain("像真实对话，不像通用 AI 助手。");
+    expect(system).toContain("避免套话开场、强行总结、过度整齐的列表");
   });
 
   it("tells the model not to claim remembering things just said", async () => {

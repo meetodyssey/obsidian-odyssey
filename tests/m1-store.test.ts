@@ -72,6 +72,7 @@ describe("M1 local fact source", () => {
     await store.ensureInitialized();
 
     expect(vault.folders.has("Odyssey")).toBe(true);
+    expect(vault.folders.has("Odyssey/Conversations")).toBe(true);
     expect(vault.folders.has("Odyssey/L1_Recent_Memory")).toBe(true);
     expect(Array.from(vault.folders).some(path => path.startsWith("Odyssey/L1_"))).toBe(true);
     expect(vault.folders.has("Odyssey/Corrections")).toBe(true);
@@ -81,19 +82,20 @@ describe("M1 local fact source", () => {
     expect(vault.folders.has("Odyssey/Index")).toBe(true);
   });
 
-  it("writes a conversation turn as an L1 raw memory", async () => {
+  it("writes a conversation turn to Conversations as source material", async () => {
     const { MarkdownStore } = await import("../src/store/markdown-store");
     const store = new MarkdownStore({ vault } as any, DEFAULT_SETTINGS);
     await store.ensureInitialized();
 
     const id = await store.writeConversationTurn("user", "Today I want to record an important event.");
 
-    expect(id).toMatch(/^mem_/);
-    const path = store.rawMemoryPath("L1", id);
-    expect(path).toMatch(/^Odyssey\/L1_Recent_Memory\/\d{4}\/\d{2}\/mem_.*\.md$/);
+    expect(id).toMatch(/^turn_/);
+    const path = store.conversationTurnPath(id);
+    expect(path).toMatch(/^Odyssey\/Conversations\/\d{4}\/\d{2}\/turn_.*\.md$/);
     const content = vault.files.get(path)?.content ?? "";
     expect(content).toContain("## Conversation Turn");
     expect(content).toContain("Today I want to record an important event.");
+    expect(content).toContain("type: conversation");
   });
 
   it("serializes concurrent conversation turn writes", async () => {
@@ -107,14 +109,14 @@ describe("M1 local fact source", () => {
       store.writeConversationTurn("user", "Third message")
     ]);
 
-    expect(ids.every(id => id.startsWith("mem_"))).toBe(true);
+    expect(ids.every(id => id.startsWith("turn_"))).toBe(true);
     for (const id of ids) {
-      const path = store.rawMemoryPath("L1", id);
+      const path = store.conversationTurnPath(id);
       expect(vault.files.has(path)).toBe(true);
     }
   });
 
-  it("loads recent conversation turns from L1 raw memory", async () => {
+  it("loads recent conversation turns from Conversations", async () => {
     const { MarkdownStore } = await import("../src/store/markdown-store");
     const store = new MarkdownStore({ vault } as any, DEFAULT_SETTINGS);
     await store.ensureInitialized();
@@ -134,7 +136,7 @@ describe("M1 local fact source", () => {
     expect(messages[2].content).toBe("Continued response");
   });
 
-  it("loads conversation turns for a date from L1", async () => {
+  it("loads conversation turns for a date from Conversations", async () => {
     const { MarkdownStore } = await import("../src/store/markdown-store");
     const store = new MarkdownStore({ vault } as any, DEFAULT_SETTINGS);
     await store.ensureInitialized();
@@ -148,6 +150,18 @@ describe("M1 local fact source", () => {
     expect(result!.messages.length).toBe(2);
     expect(result!.messages[0].role).toBe("user");
     expect(result!.messages[1].role).toBe("assistant");
+  });
+
+  it("keeps reading legacy conversation turns stored in L1 raw memory", async () => {
+    const { MarkdownStore } = await import("../src/store/markdown-store");
+    const store = new MarkdownStore({ vault } as any, DEFAULT_SETTINGS);
+    await store.ensureInitialized();
+
+    await store.writeRawMemory("L1", "## Conversation Turn\n\nLegacy user message.", [], ["conversation_turn", "user"]);
+
+    const messages = await store.readRecentL1ConversationTurns(5);
+
+    expect(messages.some(message => message.role === "user" && message.content === "Legacy user message.")).toBe(true);
   });
 
   it("writes raw_memory and memory_summary with source/anchor frontmatter", async () => {
@@ -344,13 +358,13 @@ describe("M1 local fact source", () => {
     const extractor = new MemoryExtractor(store);
 
     const rejected = await extractor.extract({
-      conversationPath: "Odyssey/L1_Recent_Memory/2026/05/mem_test001.md",
+      conversationPath: "Odyssey/Conversations/2026/05/turn_test001.md",
       userMessage: "Diagnose whether I have a personality disorder."
     });
     expect(rejected.rawMemoryIds).toEqual([]);
 
     const result = await extractor.extract({
-      conversationPath: "Odyssey/L1_Recent_Memory/2026/05/mem_test001.md",
+      conversationPath: "Odyssey/Conversations/2026/05/turn_test001.md",
       userMessage: "Remember: during my second year of college, I first wanted to build an open-source project."
     });
     expect(result.rawMemoryIds.length).toBe(1);
@@ -368,7 +382,7 @@ describe("M1 local fact source", () => {
     const extractor = new MemoryExtractor(store);
 
     const result = await extractor.extract({
-      conversationPath: "Odyssey/L1_Recent_Memory/2026/05/mem_test002.md",
+      conversationPath: "Odyssey/Conversations/2026/05/turn_test002.md",
       userMessage: "My university was Sample University, and my major was communications engineering."
     });
 
@@ -393,6 +407,9 @@ describe("M1 local fact source", () => {
               content: "The user's university was Sample University and their major was communications engineering.",
               level: "L1",
               tags: ["university", "major"],
+              keywords: ["Sample University", "communications engineering"],
+              entities: ["Sample University"],
+              occurred_at: "2026-06-01T10:00:00.000Z",
               confidence: "high"
             }
           ],
@@ -400,6 +417,9 @@ describe("M1 local fact source", () => {
             {
               content: "The user's university and major.",
               kind: "important_fact",
+              keywords: ["Sample University", "communications engineering"],
+              entities: ["Sample University"],
+              occurred_at: "2026-06-01T10:00:00.000Z",
               confidence: "high"
             }
           ]
@@ -410,7 +430,7 @@ describe("M1 local fact source", () => {
     const extractor = new MemoryExtractor(store, modelGateway as any);
 
     const result = await extractor.extract({
-      conversationPath: "Odyssey/L1_Recent_Memory/2026/05/mem_test002.md",
+      conversationPath: "Odyssey/Conversations/2026/05/turn_test002.md",
       userMessage: "My university was Sample University, and my major was communications engineering."
     });
 
@@ -422,12 +442,50 @@ describe("M1 local fact source", () => {
     expect(summaryEntry?.file.path).toContain("Odyssey/L1_");
     expect(parsedRaw.frontmatter.level).toBe("L1");
     expect(parsed.frontmatter.level).toBe("L1");
+    expect(parsedRaw.frontmatter.tags).toEqual(expect.arrayContaining(["Sample University", "communications engineering"]));
+    expect(parsed.frontmatter.tags).toEqual(expect.arrayContaining(["Sample University", "communications engineering"]));
+    expect(parsedRaw.body).toContain("## Occurred");
+    expect(parsedRaw.body).toContain("2026-06-01T10:00:00.000Z");
+    expect(parsed.body).toContain("Keywords: Sample University, communications engineering");
+    expect(parsed.body).toContain("Source: [[Odyssey/Conversations/2026/05/turn_test002.md]]");
     expect(parsed.frontmatter.anchors).toEqual(expect.arrayContaining([
       expect.stringContaining("Odyssey/L1_")
     ]));
     expect(parsed.frontmatter.anchors).not.toEqual(expect.arrayContaining([
       expect.stringContaining("Odyssey/L3_")
     ]));
+  });
+
+  it("writes fallback summaries with occurrence time and keywords from the source window", async () => {
+    const { MarkdownStore } = await import("../src/store/markdown-store");
+    const { MemoryExtractor } = await import("../src/memory/memory-extractor");
+    const { parseMarkdown } = await import("../src/utils/frontmatter");
+    const store = new MarkdownStore({ vault } as any, DEFAULT_SETTINGS);
+    await store.ensureInitialized();
+    const extractor = new MemoryExtractor(store);
+
+    const result = await extractor.extract({
+      conversationPath: "Odyssey/Conversations/2026/06/turn_topic.md",
+      userMessage: "Remember this literature project.",
+      recentMessages: [
+        { role: "user", content: "I finished a literature project, a fifty-thousand-word novel named River Trace.", created: "2026-06-01T09:30:00.000Z" },
+        { role: "assistant", content: "Noted.", created: "2026-06-01T09:30:10.000Z" }
+      ],
+      consolidationMode: "l0_window",
+      forceRuleBased: true
+    });
+
+    const rawEntry = Array.from(vault.files.values()).find(entry => entry.file.path.includes(result.rawMemoryIds[0]));
+    const summaryEntry = Array.from(vault.files.values()).find(entry => entry.file.path.includes(result.summaryIds[0]));
+    const parsedRaw = parseMarkdown(rawEntry?.content ?? "");
+    const parsedSummary = parseMarkdown(summaryEntry?.content ?? "");
+
+    expect(parsedRaw.body).toContain("## Occurred");
+    expect(parsedRaw.body).toContain("2026-06-01T09:30:00.000Z");
+    expect(parsedRaw.body).toContain("## Keywords");
+    expect(parsedRaw.frontmatter.tags).toEqual(expect.arrayContaining(["literature"]));
+    expect(parsedSummary.body).toContain("Occurred: 2026-06-01T09:30:00.000Z");
+    expect(parsedSummary.body).toContain("Keywords:");
   });
 
   it("exports the current chat into an Obsidian-compatible markdown note", async () => {

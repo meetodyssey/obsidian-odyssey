@@ -31,6 +31,7 @@ export class PluginLocalRuntime implements AgentRuntime {
   private turnsSinceL0Compaction = 0;
   private charsSinceL0Compaction = 0;
   private l1PersistedCount = 0;
+  private sessionStartCount = 0;
 
   constructor(
     private readonly getSettings: () => OdysseySettings,
@@ -46,6 +47,7 @@ export class PluginLocalRuntime implements AgentRuntime {
   hydrateRecentMessages(messages: ChatMessage[]): void {
     this.recentMessages = messages.map(message => ({ ...message, ephemeral: false })).slice(-40);
     this.l1PersistedCount = this.recentMessages.length;
+    this.sessionStartCount = this.recentMessages.length;
   }
 
   async consolidateOnSessionEnd(): Promise<void> {
@@ -59,6 +61,7 @@ export class PluginLocalRuntime implements AgentRuntime {
 
   endSession(): void {
     this.recentMessages = this.recentMessages.filter(message => !message.ephemeral && message.role !== "system").slice(-40);
+    this.sessionStartCount = this.recentMessages.length;
     this.turnsSinceL0Compaction = 0;
     this.charsSinceL0Compaction = 0;
   }
@@ -68,11 +71,12 @@ export class PluginLocalRuntime implements AgentRuntime {
     const lang = detectLanguage(input.message);
     const userMessage: ChatMessage = { role: "user", content: input.message, created: nowIso(), ephemeral };
     let conversationPath = "";
+    const contextHistory = this.contextHistoryFor(input.message);
     this.recentMessages.push(userMessage);
 
     const confirmedCorrections = ephemeral ? [] : await this.correctionDetector.maybeWritePendingCorrection(input.message);
     const intent = await this.decomposeIntent({ message: input.message });
-    const context = await this.contextBuilder.build(input.message, this.recentMessages, intent, input.attachedReferences ?? []);
+    const context = await this.contextBuilder.build(input.message, contextHistory, intent, input.attachedReferences ?? []);
     const assistantMessages: ChatMessage[] = [];
     const continuationReasons: string[] = [];
     const modelMessages = [...context.messages];
@@ -107,7 +111,7 @@ export class PluginLocalRuntime implements AgentRuntime {
     }
 
     const assistantContent = assistantMessages.map(message => message.content).join("\n\n");
-    this.recentMessages = this.recentMessages.slice(-40);
+    this.trimRecentMessages();
     const turnChars = input.message.length + assistantContent.length;
     this.turnsSinceL0Compaction += 1;
     this.charsSinceL0Compaction += turnChars;
@@ -132,7 +136,7 @@ export class PluginLocalRuntime implements AgentRuntime {
       const toPersist = this.recentMessages.slice(this.l1PersistedCount).filter(m => !m.ephemeral && m.role !== "system");
       for (const msg of toPersist.slice(-12)) {
         const id = await this.store.writeConversationTurn(msg.role, msg.content);
-        if (!conversationPath) conversationPath = this.store.rawMemoryPath("L1", id);
+        if (!conversationPath) conversationPath = this.store.conversationTurnPath(id);
       }
       this.l1PersistedCount = this.recentMessages.length;
     }
@@ -324,7 +328,26 @@ export class PluginLocalRuntime implements AgentRuntime {
     this.recentMessages = [
       summaryMessage,
       ...keep
-    ].slice(-40);
+    ];
+    this.trimRecentMessages();
+  }
+
+  private contextHistoryFor(userMessage: string): ChatMessage[] {
+    if (isLastConversationQuery(userMessage)) {
+      return this.recentMessages.slice(0, this.sessionStartCount);
+    }
+    if (isJustSaidQuery(userMessage)) {
+      return this.recentMessages.slice(this.sessionStartCount);
+    }
+    return this.recentMessages.slice();
+  }
+
+  private trimRecentMessages(limit = 40): void {
+    const overflow = Math.max(0, this.recentMessages.length - limit);
+    if (overflow === 0) return;
+    this.recentMessages = this.recentMessages.slice(-limit);
+    this.l1PersistedCount = Math.max(0, this.l1PersistedCount - overflow);
+    this.sessionStartCount = Math.max(0, this.sessionStartCount - overflow);
   }
 
   private isLowInformationMessage(message: string): boolean {
@@ -370,4 +393,58 @@ export class PluginLocalRuntime implements AgentRuntime {
   async rebuildIndex(): Promise<RebuildIndexResult> {
     return this.index.rebuild();
   }
+}
+
+function isLastConversationQuery(message: string): boolean {
+  const normalized = message.toLowerCase().replace(/\s+/g, " ").trim();
+  if (includesAny(normalized, [
+    "last time we chat",
+    "last time we chatted",
+    "last conversation",
+    "last chat",
+    "previous conversation",
+    "previous chat",
+    "when did we chat",
+    "when we chat last time",
+    "when we chatted last time"
+  ])) {
+    return true;
+  }
+  return includesAny(message, [
+    "上次聊天",
+    "上一次聊天",
+    "最后一次聊天",
+    "上次对话",
+    "上一次对话",
+    "最后一次对话",
+    "上回聊天",
+    "上回对话",
+    "上次我们聊",
+    "上一次我们聊"
+  ]);
+}
+
+function isJustSaidQuery(message: string): boolean {
+  const normalized = message.toLowerCase().replace(/\s+/g, " ").trim();
+  if (includesAny(normalized, [
+    "what did i just say",
+    "what did i say just now",
+    "what was my last message",
+    "what did i just tell you",
+    "what did we just talk about",
+    "what were we just talking about"
+  ])) {
+    return true;
+  }
+  return includesAny(message, [
+    "我刚刚说了什么",
+    "我刚才说了什么",
+    "我刚说了什么",
+    "我上一句说了什么",
+    "我上一条说了什么",
+    "刚刚我们聊了什么",
+    "刚才我们聊了什么",
+    "刚刚在说什么",
+    "刚才在说什么"
+  ]);
 }

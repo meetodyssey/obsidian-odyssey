@@ -7,12 +7,18 @@ interface ExtractedRawMemory {
   content: string;
   level: "L1";
   tags: string[];
+  keywords: string[];
+  entities: string[];
+  occurred_at?: string;
   confidence: "low" | "medium" | "high";
 }
 
 interface ExtractedSummary {
   content: string;
   kind: "recent_context" | "important_fact" | "pattern";
+  keywords: string[];
+  entities: string[];
+  occurred_at?: string;
   confidence: "low" | "medium" | "high";
 }
 
@@ -68,17 +74,21 @@ export class MemoryExtractor {
       .join("\n\n");
 
     const systemPrompt = [
-      "You are the Odyssey memory extractor. Extract key user information from conversations for long-term memory.",
+      "You are the Odyssey memory extractor. Extract source-backed factual memories from conversations for long-term memory.",
       input.consolidationMode === "l0_window"
         ? "This is L0 window consolidation: preserve the user's own words from the full L0 window as L1 raw memory, then create concise L1 summaries anchored to that raw memory. Do not treat the final turn as the whole memory."
         : "This is single-turn consolidation triggered by an explicit memory request, a long message, or a correction.",
       "",
       "Core principles:",
       "- Err on the side of extracting less. When uncertain, skip.",
-      "- Only extract facts, preferences, emotions, and events the user explicitly expressed.",
+      "- Only extract facts, preferences, emotions, knowledge interests, and events the user explicitly expressed.",
       "- Never extract user facts from Odyssey replies — those may contain inferences or hallucinations.",
+      "- ATTRIBUTION: do not record an idea as the user's unless the USER stated it.",
       "- Never add details the user didn't say. If the user said 'I was a moderator,' do not extract 'the user set a hands-off moderation policy' — that is fabrication.",
-      "- In l0_window mode, raw_memories.content should cover the meaningful user-authored material across the window, using compact excerpts or close paraphrase. In turn mode, it may focus on the current user message.",
+      "- In l0_window mode, group related user messages by topic. raw_memories.content should cover meaningful user-authored material for the topic, using compact excerpts or close paraphrase. In turn mode, it may focus on the current user message.",
+      "- Summaries must summarize the actual topic being discussed, not merely list isolated facts.",
+      "- TIME: preserve any visible timestamp or date range from the user messages. If a timestamp is visible, set occurred_at to the earliest relevant timestamp. If no timestamp is visible, omit occurred_at.",
+      "- KEYWORDS: include 2-6 concrete keywords useful for search, in the conversation language when possible.",
       "- When a fragment refers to an action or emotion whose subject was clarified in a nearby message (e.g., a classmate, a family member, a colleague), include the subject explicitly in the extracted content. Do not extract pronouns or subject-ambiguous sentences without their referent.",
       "- If the user explicitly says to remember, note this as an importance signal. It does not mean Odyssey only remembers then; it means the item should be tagged and weighted as explicitly important.",
       "- Never diagnose. Never label the user.",
@@ -88,16 +98,17 @@ export class MemoryExtractor {
       "Output pure JSON (no markdown code fences):",
       "{",
       '  "raw_memories": [',
-      '    {"content": "verbatim fact fragment from the user", "level": "L1", "tags": ["tag"], "confidence": "medium"}',
+      '    {"content": "source-backed user fact or topic fragment", "level": "L1", "tags": ["tag"], "keywords": ["keyword"], "entities": ["name"], "occurred_at": "YYYY-MM-DDTHH:mm:ss.sssZ", "confidence": "medium"}',
       "  ],",
       '  "summaries": [',
-      '    {"content": "one-sentence summary", "kind": "recent_context", "confidence": "medium"}',
+      '    {"content": "one-sentence topic summary with enough context to stand alone", "kind": "recent_context", "keywords": ["keyword"], "entities": ["name"], "occurred_at": "YYYY-MM-DDTHH:mm:ss.sssZ", "confidence": "medium"}',
       "  ]",
       "}",
       "",
       "Field notes:",
       "- raw_memories.level: always L1 in MVP automatic extraction.",
       "- summaries.kind: recent_context | important_fact | pattern.",
+      "- keywords/entities should be arrays; use [] when none.",
       "- If nothing is worth extracting this round, return empty arrays."
     ].join("\n");
 
@@ -142,6 +153,9 @@ export class MemoryExtractor {
         content: typeof item.content === "string" ? item.content.trim() : "",
         level: "L1" as const,
         tags: Array.isArray(item.tags) ? item.tags.map(String).slice(0, 6) : [],
+        keywords: Array.isArray(item.keywords) ? item.keywords.map(String).map(value => value.trim()).filter(Boolean).slice(0, 8) : [],
+        entities: Array.isArray(item.entities) ? item.entities.map(String).map(value => value.trim()).filter(Boolean).slice(0, 8) : [],
+        occurred_at: typeof item.occurred_at === "string" && item.occurred_at.trim() ? item.occurred_at.trim() : undefined,
         confidence: ["low", "medium", "high"].includes(String(item.confidence)) ? item.confidence as ExtractedRawMemory["confidence"] : "medium"
       }))
       .filter(item => item.content.length >= 8);
@@ -155,6 +169,9 @@ export class MemoryExtractor {
         content: typeof item.content === "string" ? item.content.trim() : "",
         kind: ["recent_context", "important_fact", "pattern"].includes(String(item.kind))
           ? item.kind as ExtractedSummary["kind"] : "recent_context",
+        keywords: Array.isArray(item.keywords) ? item.keywords.map(String).map(value => value.trim()).filter(Boolean).slice(0, 8) : [],
+        entities: Array.isArray(item.entities) ? item.entities.map(String).map(value => value.trim()).filter(Boolean).slice(0, 8) : [],
+        occurred_at: typeof item.occurred_at === "string" && item.occurred_at.trim() ? item.occurred_at.trim() : undefined,
         confidence: ["low", "medium", "high"].includes(String(item.confidence)) ? item.confidence as ExtractedSummary["confidence"] : "medium"
       }))
       .filter(item => item.content.length >= 8);
@@ -202,11 +219,14 @@ export class MemoryExtractor {
         "",
         raw.content,
         "",
+        ...(raw.occurred_at ? ["## Occurred", "", raw.occurred_at, ""] : []),
+        ...(raw.keywords.length ? ["## Keywords", "", raw.keywords.map(keyword => `- ${keyword}`).join("\n"), ""] : []),
+        "",
         "## 来源",
         "",
         `- ${conversationAnchor}`
       ].join("\n");
-      const id = await this.store.writeRawMemory(raw.level, body, [conversationAnchor], [...tags, ...raw.tags]);
+      const id = await this.store.writeRawMemory(raw.level, body, [conversationAnchor], [...tags, ...raw.tags, ...raw.keywords, ...raw.entities]);
       result.rawMemoryIds.push(id);
       result.changedPaths?.push(this.store.rawMemoryPath(raw.level, id));
       rawAnchors.push(this.store.recordAnchor(raw.level, id));
@@ -215,12 +235,13 @@ export class MemoryExtractor {
 
     for (const summary of output.summaries) {
       const anchors = rawAnchors.length > 0 ? rawAnchors : [conversationAnchor];
+      const summaryBody = renderSummaryMemory(summary, conversationAnchor);
       try {
         const id = await this.store.writeMemorySummary(
           highestMemoryLevel(rawLevels) ?? "L1",
-          summary.content,
+          summaryBody,
           [...anchors, conversationAnchor],
-          tags,
+          [...tags, ...summary.keywords, ...summary.entities],
           "high"
         );
         result.summaryIds.push(id);
@@ -246,23 +267,35 @@ export class MemoryExtractor {
       : input.userMessage.trim();
     if (!sourceText) return result;
     const tags = this.memoryTags(sourceText, input.userMessage);
+    const occurredAt = earliestVisibleMessageTime(input);
+    const keywords = extractKeywords(sourceText).slice(0, 8);
     const body = [
       input.consolidationMode === "l0_window" ? "## L0 窗口原始记忆" : "## Raw Memory",
       "",
       sourceText,
       "",
+      ...(occurredAt ? ["## Occurred", "", occurredAt, ""] : []),
+      ...(keywords.length ? ["## Keywords", "", keywords.map(keyword => `- ${keyword}`).join("\n"), ""] : []),
+      "",
       "## Source",
       "",
       `- ${anchor}`
     ].join("\n");
-    const rawId = await this.store.writeRawMemory("L1", body, [anchor], tags);
+    const rawId = await this.store.writeRawMemory("L1", body, [anchor], [...tags, ...keywords]);
     result.rawMemoryIds.push(rawId);
     result.changedPaths?.push(this.store.rawMemoryPath("L1", rawId));
 
     const rawAnchor = this.store.recordAnchor("L1", rawId);
     const summary = this.ruleBasedSummarize(sourceText);
+    const summaryBody = [
+      summary,
+      "",
+      ...(occurredAt ? [`Occurred: ${occurredAt}`, ""] : []),
+      ...(keywords.length ? [`Keywords: ${keywords.join(", ")}`, ""] : []),
+      `Source: ${anchor}`
+    ].join("\n").trim();
     try {
-      const summaryId = await this.store.writeMemorySummary("L1", summary, [anchor, rawAnchor], tags, "high");
+      const summaryId = await this.store.writeMemorySummary("L1", summaryBody, [anchor, rawAnchor], [...tags, ...keywords], "high");
       result.summaryIds.push(summaryId);
       result.changedPaths?.push(this.store.memorySummaryPath("L1", summaryId));
     } catch {
@@ -350,4 +383,23 @@ export class MemoryExtractor {
 function highestMemoryLevel(levels: Array<ExtractedRawMemory["level"]>): ExtractedRawMemory["level"] | undefined {
   if (levels.includes("L1")) return "L1";
   return undefined;
+}
+
+function renderSummaryMemory(summary: ExtractedSummary, conversationAnchor: string): string {
+  return [
+    summary.content.trim(),
+    "",
+    ...(summary.occurred_at ? ["Occurred: " + summary.occurred_at, ""] : []),
+    ...(summary.keywords.length ? [`Keywords: ${summary.keywords.join(", ")}`, ""] : []),
+    ...(summary.entities.length ? [`Entities: ${summary.entities.join(", ")}`, ""] : []),
+    `Source: ${conversationAnchor}`
+  ].join("\n").trim();
+}
+
+function earliestVisibleMessageTime(input: ExtractMemoryInput): string | undefined {
+  const times = (input.recentMessages ?? [])
+    .filter(message => message.role === "user")
+    .map(message => message.created)
+    .filter((value): value is string => Boolean(value));
+  return times.sort()[0];
 }
