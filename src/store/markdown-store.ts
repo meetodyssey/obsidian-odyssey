@@ -37,18 +37,27 @@ export class MarkdownStore {
   }
 
   async writeConversationTurn(role: ChatMessage["role"], content: string): Promise<string> {
+    const created = nowIso();
     const id = makeId("turn");
-    const meta: AgentRecordMeta = {
-      id,
-      type: "conversation",
-      created: nowIso(),
-      tags: ["conversation_turn", role],
-      entities: ["user"],
-      confidence: "medium",
-      status: "active"
-    };
-    const body = `## Conversation Turn\n\n${content.trim()}\n`;
-    await this.writeRecord(this.conversationTurnPath(id), { meta, body });
+    const date = datePartFromId(id) ?? dateStamp(new Date());
+    const path = this.conversationTranscriptPath(date);
+    const label = role === "user" ? "Me" : role === "assistant" ? this.settings.odysseyName || "Odyssey" : "System";
+    const turn = [
+      `## ${created} ${label} ^${id}`,
+      "",
+      content.trim(),
+      ""
+    ].join("\n");
+    await this.enqueueWrite(async () => {
+      await this.ensureParent(path);
+      const existing = await this.app.vault.adapter.exists(path)
+        ? await this.app.vault.adapter.read(path)
+        : "";
+      const next = existing.trim()
+        ? `${existing.trimEnd()}\n\n${turn}`
+        : `# ${date}\n\n${turn}`;
+      await this.createOrModify(path, next);
+    });
     return id;
   }
 
@@ -60,8 +69,7 @@ export class MarkdownStore {
     const entries: Array<ChatMessage & { path: string }> = [];
     for (const file of conversationFiles) {
       try {
-        const entry = await this.readConversationTurnFile(file);
-        if (entry) entries.push(entry);
+        entries.push(...await this.readConversationTurnEntries(file));
       } catch { /* skip unreadable files */ }
     }
     return entries
@@ -78,8 +86,7 @@ export class MarkdownStore {
     const entries: Array<ChatMessage & { path: string }> = [];
     for (const file of conversationFiles) {
       try {
-        const entry = await this.readConversationTurnFile(file);
-        if (entry) entries.push(entry);
+        entries.push(...await this.readConversationTurnEntries(file));
       } catch { /* skip unreadable files */ }
     }
     const messages = entries
@@ -114,7 +121,14 @@ export class MarkdownStore {
 
   conversationTurnPath(id: string): string {
     const { year, month } = datePartsFromId(id) ?? dateParts();
-    return this.path(`Conversations/${year}/${month}/${id}.md`);
+    const day = datePartFromId(id) ?? dateStamp(new Date());
+    return `${this.path(`Conversations/${year}/${month}/${day}.md`)}#^${id}`;
+  }
+
+  private conversationTranscriptPath(date: string): string {
+    const year = date.slice(0, 4);
+    const month = date.slice(5, 7);
+    return this.path(`Conversations/${year}/${month}/${date}.md`);
   }
 
   async writeMemorySummary(level: Exclude<RecordLevel, "L0">, summary: string, anchors: string[], tags: string[] = [], _priority: "low" | "normal" | "high" = "high"): Promise<string> {
@@ -480,22 +494,24 @@ export class MarkdownStore {
     return normalized.startsWith(modernPrefix) || normalized.startsWith(legacyPrefix);
   }
 
-  private async readConversationTurnFile(file: TFile): Promise<(ChatMessage & { path: string }) | null> {
+  private async readConversationTurnEntries(file: TFile): Promise<Array<ChatMessage & { path: string }>> {
     const content = await this.readFile(file.path);
     const parsed = parseMarkdown(content);
     const tags = Array.isArray(parsed.frontmatter.tags) ? parsed.frontmatter.tags as string[] : [];
-    if (!tags.includes("conversation_turn")) return null;
+    if (!tags.includes("conversation_turn")) {
+      return parseLegacyDailyConversationTranscript(content, normalizePath(file.path));
+    }
     const role = tags.includes("user") ? "user" as const
       : tags.includes("assistant") ? "assistant" as const
       : "system" as const;
     const body = parsed.body.replace(/^## Conversation Turn\n+/i, "").trim();
-    if (!body) return null;
-    return {
+    if (!body) return [];
+    return [{
       role,
       content: body,
       created: typeof parsed.frontmatter.created === "string" ? parsed.frontmatter.created : undefined,
       path: normalizePath(file.path)
-    };
+    }];
   }
 
   path(child: string): string {
@@ -627,10 +643,54 @@ function conversationSortKey(entry: { created?: string; path: string }): string 
   return `${entry.created ?? ""}|${entry.path}`;
 }
 
+function parseLegacyDailyConversationTranscript(content: string, path: string): Array<ChatMessage & { path: string }> {
+  const lines = content.split(/\r?\n/);
+  const entries: Array<ChatMessage & { path: string }> = [];
+  let current: { role: ChatMessage["role"]; created?: string; body: string[]; index: number; blockId?: string } | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    const body = current.body.join("\n").trim();
+    if (body) {
+      entries.push({
+        role: current.role,
+        content: body,
+        created: current.created,
+        path: current.blockId ? `${path}#^${current.blockId}` : `${path}#turn-${String(current.index).padStart(4, "0")}`
+      });
+    }
+  };
+
+  for (const line of lines) {
+    const heading = line.match(/^##\s+(\d{4}-\d{2}-\d{2}T[^\s]+)\s+(.+?)(?:\s+\^([A-Za-z0-9_-]+))?\s*$/);
+    if (heading) {
+      flush();
+      const label = heading[2].trim().toLowerCase();
+      const role: ChatMessage["role"] = label === "me" || label === "user"
+        ? "user"
+        : label === "odyssey" || label === "assistant"
+          ? "assistant"
+          : "system";
+      current = { role, created: heading[1], body: [], index: entries.length, blockId: heading[3] };
+      continue;
+    }
+    if (current) current.body.push(line);
+  }
+
+  flush();
+  return entries;
+}
+
 function datePartsFromId(id: string): { year: string; month: string } | null {
   const match = id.match(/^[a-z]+_(\d{4})(\d{2})\d{2}_/i);
   if (!match) return null;
   return { year: match[1], month: match[2] };
+}
+
+function datePartFromId(id: string): string | null {
+  const match = id.match(/^[a-z]+_(\d{4})(\d{2})(\d{2})_/i);
+  if (!match) return null;
+  return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
 function stableId(input: string): string {

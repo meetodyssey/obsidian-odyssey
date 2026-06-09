@@ -128,6 +128,65 @@ describe("context builder source-of-truth rules", () => {
 
     expect(system).toContain("current message");
     expect(system).toContain("remember from before");
+    expect(system).toContain("2-3 concrete touchpoints");
+    expect(system).toContain("Do not include the current turn as evidence");
+    expect(system).toContain("meet that warmth first");
+    expect(system).toContain("do not undercut the moment with a long disclaimer");
+    expect(system).toContain("User facts and quotations may only come from user_source_of_truth lines");
+    expect(system).toContain("Do not speculate about the user's hidden motive");
+    expect(system).toContain("no tool access");
+    expect(system).toContain("Do not emit tool calls, DSML");
+    expect(system).toContain("Attribute ideas correctly");
+  });
+
+  it("adds an app-style short reply directive for light chat", async () => {
+    const store = makeStore();
+    const retrieval = makeRetrieval();
+    const builder = new ContextBuilder({ ...DEFAULT_SETTINGS, modelTier: "frontier" }, store as any, retrieval as any);
+
+    const context = await builder.build("hi", [], {
+      mode: "normal_chat",
+      keywords: ["hi"],
+      hasExplicitTimeHint: false
+    });
+    const rendered = context.messages.map(message => message.content).join("\n\n");
+
+    expect(rendered).toContain("Current Turn Reply Style");
+    expect(rendered).toContain("This is light chat");
+    expect(rendered).toContain("Reply in 1-3 sentences");
+  });
+
+  it("adds an app-style warmth directive for emotionally engaged replies", async () => {
+    const store = makeStore();
+    const retrieval = makeRetrieval();
+    const builder = new ContextBuilder({ ...DEFAULT_SETTINGS, modelTier: "frontier" }, store as any, retrieval as any);
+
+    const context = await builder.build("great! you really remember me!", [], {
+      mode: "recall",
+      keywords: ["remember"],
+      hasExplicitTimeHint: false
+    });
+    const rendered = context.messages.map(message => message.content).join("\n\n");
+
+    expect(rendered).toContain("The user is emotionally engaged or warm");
+    expect(rendered).toContain("Meet the feeling first");
+  });
+
+  it("keeps broad remember-me checks brief and avoids psychoanalysis", async () => {
+    const store = makeStore();
+    const retrieval = makeRetrieval();
+    const builder = new ContextBuilder({ ...DEFAULT_SETTINGS, modelTier: "frontier" }, store as any, retrieval as any);
+
+    const context = await builder.build("hi, Do you remember me?", [], {
+      mode: "recall",
+      keywords: ["remember"],
+      hasExplicitTimeHint: false
+    });
+    const rendered = context.messages.map(message => message.content).join("\n\n");
+
+    expect(rendered).toContain("This is a simple memory check");
+    expect(rendered).toContain("1-2 concrete user-authored touchpoints");
+    expect(rendered).toContain("Do not psychoanalyze why the user is asking");
   });
 
   it("instructs the model to acknowledge errors directly", async () => {

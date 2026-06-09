@@ -50,6 +50,7 @@ export class ContextBuilder {
     const references = this.renderRetrieved(visibleRetrieved.filter(item => item.memory.type === "reference"), 700);
 
     const system = await this.buildSystemPrompt(isRecall ? "standard" : tier, speed, lang);
+    const replyStyle = buildReplyStyleDirective(userMessage, lang);
     const evidenceBoundary = buildEvidenceBoundary(visibleRetrieved, attachedReferences, intent);
     const isConstrained = tier === "constrained" && !isRecall;
     const hasEvidence = visibleRetrieved.length > 0 || attachedReferences.length > 0;
@@ -62,6 +63,7 @@ export class ContextBuilder {
       skipMeta
         ? ""
         : section("Evidence Boundary (read this first)", evidenceBoundary),
+      section("Current Turn Reply Style", replyStyle),
       section("L0 Current Memory (recent user words)",
         isConstrained ? this.renderRecentConstrained(recentMessages, userMessage, intent, speed) : l0),
       section("L0 Attached References (current conversation priority)", attached),
@@ -486,6 +488,82 @@ function section(title: string, body: string): string {
   return body.trim() ? `## ${title}\n${body.trim()}` : "";
 }
 
+function buildReplyStyleDirective(userMessage: string, lang: "zh" | "en"): string {
+  const emotion = detectTurnEmotion(userMessage);
+  const expression = detectExpressionMode(userMessage, emotion);
+  if (lang === "zh") {
+    const role = emotion === "emotional"
+      ? "用户当下有情绪或热度：先接住感受，再给观点；除非用户明确要求，不要急着建议。"
+      : emotion === "analytical"
+        ? "用户在分析或追问：保持准确，给出框架和关键依据。"
+        : emotion === "light"
+          ? "轻量闲聊：像自然对话，短句，不要展开成报告。"
+          : "普通陪伴式对话：温和、具体，别端着。";
+    const length = expression === "brief"
+      ? "回复 1-3 句。"
+      : expression === "thorough"
+        ? "可以适当展开，但只展开与问题直接相关的部分。"
+        : "长度自然，避免强行列表。";
+    const recallCheck = isBroadRememberMeCheck(userMessage)
+      ? " 这是简单的记忆确认：用 1-2 个用户原话里的具体触点简短回答，不要揣测用户为什么这样问。"
+      : "";
+    return `[Reply style] ${role} ${length}${recallCheck}`;
+  }
+
+  const role = emotion === "emotional"
+    ? "The user is emotionally engaged or warm. Meet the feeling first, then add perspective; do not rush into advice unless asked."
+    : emotion === "analytical"
+      ? "The user is analyzing or probing. Be precise, give a useful frame, and ground the answer."
+      : emotion === "light"
+        ? "This is light chat. Keep it natural and short; do not turn it into a report."
+        : "Use a companion-like tone: warm, specific, and unforced.";
+  const length = expression === "brief"
+    ? "Reply in 1-3 sentences."
+    : expression === "thorough"
+      ? "You may go deeper, but only where it directly helps the question."
+      : "Use a natural length and avoid forced bullet lists.";
+  const recallCheck = isBroadRememberMeCheck(userMessage)
+    ? " This is a simple memory check: answer briefly with 1-2 concrete user-authored touchpoints. Do not psychoanalyze why the user is asking."
+    : "";
+  return `[Reply style] ${role} ${length}${recallCheck}`;
+}
+
+function detectTurnEmotion(text: string): "neutral" | "emotional" | "analytical" | "light" {
+  const normalized = text.trim();
+  const len = normalized.length;
+  const hasEmoji = /\p{Extended_Pictographic}/u.test(normalized);
+  const hasExclamation = /[!！¡]/.test(normalized);
+  const hasQuestion = /[?？¿؟]/.test(normalized);
+  const capsMatches = normalized.match(/[A-Z]{4,}/g);
+  const allCapsRatio = capsMatches ? capsMatches.join("").length / Math.max(1, len) : 0;
+
+  if (hasEmoji || allCapsRatio > 0.3 || (hasExclamation && len > 20)) return "emotional";
+  if (hasQuestion && len > 30) return "analytical";
+  if (len < 24) return "light";
+  return "neutral";
+}
+
+function detectExpressionMode(text: string, emotion: "neutral" | "emotional" | "analytical" | "light"): "brief" | "normal" | "thorough" {
+  if (isBroadRememberMeCheck(text)) return "brief";
+  const lenScore = Math.min(1, text.length / 120);
+  const questionScore = /[?？¿؟]/.test(text) ? 1 : 0;
+  const emotionScore = emotion === "emotional" ? 0.7 : emotion === "analytical" ? 0.8 : emotion === "light" ? 0 : 0.4;
+  const intensity = Math.min(1, 0.35 * lenScore + 0.35 * questionScore + 0.3 * emotionScore);
+  if (intensity < 0.3) return "brief";
+  if (intensity < 0.75) return "normal";
+  return "thorough";
+}
+
+function isBroadRememberMeCheck(text: string): boolean {
+  const normalized = text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+  return (
+    /\bdo you remember me\b/.test(normalized)
+    || /\bdo you remember\b/.test(normalized)
+    || normalized.includes("你记得我")
+    || normalized.includes("还记得我")
+  ) && normalized.length <= 80;
+}
+
 function buildEvidenceBoundary(retrieved: RetrievedMemory[], attachedReferences: AttachedReference[], intent: IntentResult): string {
   const memoryFacts = retrieved
     .filter(item => item.memory.type !== "reference")
@@ -503,6 +581,8 @@ function buildEvidenceBoundary(retrieved: RetrievedMemory[], attachedReferences:
     "Use only the evidence listed in the following context. Missing evidence is a valid answer.",
     documentRule,
     "Old assistant messages are continuity only, never proof that the user said something.",
+    "L0 raw-memory window bullets are user-authored source excerpts, even in older records that lack an explicit 'user:' label. Do not call them Odyssey replies.",
+    "Never infer the user's emotional motive for asking unless the user explicitly states it.",
     "",
     "Visible attached sources:",
     attachments.length ? attachments.join("\n") : "- none",
@@ -551,6 +631,13 @@ function runtimeInvariantEn(): string {
     "- If asked why you used a language or claim the user used a language before, cite a visible user-message source. If no specific source is visible, say you cannot verify that claim.",
     "- If asked when you last chatted or what the last conversation was, exclude the entire current live session from past-conversation evidence. Use earlier saved turns only; if none are visible, say you do not have an earlier record.",
     "- If asked what the user just said, answer only from the current live session before the current user turn, not from older saved conversations.",
+    "- If the user broadly asks whether you remember them, answer with 2-3 concrete touchpoints from visible memory instead of an audit-style inventory. Do not include the current turn as evidence of remembering them.",
+    "- If the user reacts warmly to being remembered, meet that warmth first. You may add a brief evidence boundary, but do not undercut the moment with a long disclaimer.",
+    "- User facts and quotations may only come from user_source_of_truth lines, explicit user: lines, or long-term memories that are clearly user-authored. assistant_reference_not_user_fact lines are never user facts.",
+    "- Do not speculate about the user's hidden motive or emotional state. If the user did not say they feel uncertain, stressed, or anxious in the current visible evidence, do not infer it.",
+    "- This Obsidian plugin request has no tool access. Do not emit tool calls, DSML, XML-like tool markup, JSON function calls, or ask the user to resend so you can use a tool.",
+    "- When reconstructing history from fragments, report only what the fragments contain. Do not invent connective details to make the story smoother; mark uncertainty plainly.",
+    "- Attribute ideas correctly: do not credit the user with an analysis you introduced, and do not claim as your own something the user said.",
     "Voice style:",
     "- Write like a real conversation, not a generic AI assistant.",
     "- Avoid stock openings, forced summaries, over-neat bullet lists, exaggerated claims, and empty transition words.",
@@ -568,6 +655,13 @@ function runtimeInvariantZh(): string {
     "- 如果用户询问你为什么使用某种语言，或你声称用户以前使用过某种语言，必须引用可见的用户消息来源；没有具体可见来源时，直接说无法验证。",
     "- 如果用户问上次/最后一次聊天是什么时候，当前整个实时会话都不能算作过去对话证据；只根据更早保存的 turn 回答。没有可见历史时，直接说没有更早记录。",
     "- 如果用户问自己刚刚说了什么，只根据当前实时会话中、当前这条用户消息之前的内容回答，不要从更早保存的对话里找。",
+    "- 如果用户笼统问你是否记得 TA，用 2-3 个可见记忆里的具体触点回答，不要做审计式清单，也不要把当前这轮刚说的话当作记得 TA 的证据。",
+    "- 如果用户因为被记得而开心，先接住这种开心；可以简短说明证据边界，但不要用长篇免责声明破坏这个时刻。",
+    "- 用户事实和原话只能来自 user_source_of_truth 行、明确的 user: 行，或清楚标明为用户原话的长期记忆。assistant_reference_not_user_fact 行绝不是用户事实。",
+    "- 不要揣测用户隐藏动机或情绪状态。当前可见证据里用户没说自己不确定、压力大或焦虑，就不要推断。",
+    "- 当前 Obsidian 插件请求没有工具权限。不要输出 tool call、DSML、XML 风格工具标记、JSON function call，也不要让用户重发来让你使用工具。",
+    "- 从碎片记忆重建历史时，只说碎片里实际包含的内容；不要为了让故事顺滑而补发明连接细节，不确定就明确标出。",
+    "- 正确归因：不要把你提出的分析算到用户头上，也不要把用户说过的话说成是你自己的。",
     "表达风格：",
     "- 像真实对话，不像通用 AI 助手。",
     "- 避免套话开场、强行总结、过度整齐的列表、夸大表达和空泛过渡词。",

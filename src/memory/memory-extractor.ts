@@ -351,7 +351,7 @@ export class MemoryExtractor {
       .filter(message => message.role === "user")
       .map(message => {
         const created = message.created ? `${message.created} ` : "";
-        return `- ${created}${message.content.trim()}`;
+        return `- ${created}user: ${message.content.trim()}`;
       })
       .filter(line => line.length > 2);
     return userMessages.join("\n");

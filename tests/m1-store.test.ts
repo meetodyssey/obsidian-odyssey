@@ -82,7 +82,7 @@ describe("M1 local fact source", () => {
     expect(vault.folders.has("Odyssey/Index")).toBe(true);
   });
 
-  it("writes a conversation turn to Conversations as source material", async () => {
+  it("appends conversation turns to a daily transcript with stable turn anchors", async () => {
     const { MarkdownStore } = await import("../src/store/markdown-store");
     const store = new MarkdownStore({ vault } as any, DEFAULT_SETTINGS);
     await store.ensureInitialized();
@@ -91,11 +91,13 @@ describe("M1 local fact source", () => {
 
     expect(id).toMatch(/^turn_/);
     const path = store.conversationTurnPath(id);
-    expect(path).toMatch(/^Odyssey\/Conversations\/\d{4}\/\d{2}\/turn_.*\.md$/);
-    const content = vault.files.get(path)?.content ?? "";
-    expect(content).toContain("## Conversation Turn");
+    expect(path).toMatch(/^Odyssey\/Conversations\/\d{4}\/\d{2}\/\d{4}-\d{2}-\d{2}\.md#\^turn_/);
+    const filePath = path.split("#")[0];
+    const content = vault.files.get(filePath)?.content ?? "";
+    expect(content).toContain("# ");
+    expect(content).toContain(`^${id}`);
+    expect(content).toContain(" Me ");
     expect(content).toContain("Today I want to record an important event.");
-    expect(content).toContain("type: conversation");
   });
 
   it("serializes concurrent conversation turn writes", async () => {
@@ -112,8 +114,14 @@ describe("M1 local fact source", () => {
     expect(ids.every(id => id.startsWith("turn_"))).toBe(true);
     for (const id of ids) {
       const path = store.conversationTurnPath(id);
-      expect(vault.files.has(path)).toBe(true);
+      expect(vault.files.has(path.split("#")[0])).toBe(true);
     }
+    const transcriptPaths = new Set(ids.map(id => store.conversationTurnPath(id).split("#")[0]));
+    expect(transcriptPaths.size).toBe(1);
+    const transcript = vault.files.get(Array.from(transcriptPaths)[0])?.content ?? "";
+    expect(transcript).toContain("First message");
+    expect(transcript).toContain("Second message");
+    expect(transcript).toContain("Third message");
   });
 
   it("loads recent conversation turns from Conversations", async () => {
@@ -134,6 +142,37 @@ describe("M1 local fact source", () => {
     expect(messages[1].content).toBe("Continue today");
     expect(messages[2].role).toBe("assistant");
     expect(messages[2].content).toBe("Continued response");
+  });
+
+  it("loads legacy daily conversation transcripts from Conversations", async () => {
+    const { MarkdownStore } = await import("../src/store/markdown-store");
+    const store = new MarkdownStore({ vault } as any, DEFAULT_SETTINGS);
+    await store.ensureInitialized();
+    await vault.create("Odyssey/Conversations/2026/06/2026-06-06.md", [
+      "# 2026-06-06",
+      "## 2026-06-06T01:32:05.318Z Me",
+      "",
+      "Do you remember when we chat last time?",
+      "",
+      "## 2026-06-06T01:32:33.092Z Odyssey",
+      "",
+      "It has been a while since our last conversation."
+    ].join("\n"));
+
+    const messages = await store.readRecentL1ConversationTurns(5);
+
+    expect(messages).toEqual([
+      {
+        role: "user",
+        content: "Do you remember when we chat last time?",
+        created: "2026-06-06T01:32:05.318Z"
+      },
+      {
+        role: "assistant",
+        content: "It has been a while since our last conversation.",
+        created: "2026-06-06T01:32:33.092Z"
+      }
+    ]);
   });
 
   it("loads conversation turns for a date from Conversations", async () => {
@@ -480,6 +519,7 @@ describe("M1 local fact source", () => {
     const parsedRaw = parseMarkdown(rawEntry?.content ?? "");
     const parsedSummary = parseMarkdown(summaryEntry?.content ?? "");
 
+    expect(parsedRaw.body).toContain("2026-06-01T09:30:00.000Z user: I finished a literature project");
     expect(parsedRaw.body).toContain("## Occurred");
     expect(parsedRaw.body).toContain("2026-06-01T09:30:00.000Z");
     expect(parsedRaw.body).toContain("## Keywords");
